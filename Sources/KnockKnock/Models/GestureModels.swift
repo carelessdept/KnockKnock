@@ -198,23 +198,23 @@ public struct TriggeredEventRecord: Identifiable, Sendable {
 // MARK: - Pure DSP Classification & Cadence Math (Testable & Sendable)
 
 public struct AcousticClassifierConfig: Sendable, Equatable {
-    public var sensitivity: Float = 0.72          // 0.0 ... 1.0
-    public var minimumCrestFactor: Float = 4.2    // Peak-to-RMS ratio for sharp transient
-    public var minDoubleIntervalMs: Double = 120  // Minimum ms between knocks/snaps
-    public var maxDoubleIntervalMs: Double = 460  // Maximum ms between knocks/snaps
-    public var typingSuppressionWindowMs: Double = 135
-    public var cooldownMs: Double = 650
+    public var sensitivity: Float = 0.78          // 0.0 ... 1.0
+    public var minimumCrestFactor: Float = 2.5    // Peak-to-RMS ratio for sharp transient
+    public var minDoubleIntervalMs: Double = 85   // Minimum ms between knocks/snaps
+    public var maxDoubleIntervalMs: Double = 650  // Maximum ms between knocks/snaps
+    public var typingSuppressionWindowMs: Double = 120
+    public var cooldownMs: Double = 480
 
     /// Normalized relative intervals for the custom secret rhythm (default: 4-beat cadence)
     public var targetRhythmRatios: [Double] = [1.0, 0.52, 0.52]
-    public var rhythmTolerance: Double = 0.28
+    public var rhythmTolerance: Double = 0.34
 
     public init() {}
 
     public var amplitudeGate: Float {
-        // Maps sensitivity (0.1 ... 1.0) -> gate threshold (0.28 ... 0.035)
+        // Maps sensitivity (0.1 ... 1.0) -> gate threshold (0.11 ... 0.008) tuned for MacBook built-in mics
         let clamped = max(0.1, min(1.0, sensitivity))
-        return 0.30 - (clamped * 0.265)
+        return max(0.008, 0.125 - (clamped * 0.12))
     }
 }
 
@@ -244,26 +244,21 @@ public enum AcousticSignalMath {
         let highRatio = highBandEnergy / totalEnergy
 
         // Reject sustained vocal/music frames where crest factor is low or vocal band dominates
-        guard crestFactor >= config.minimumCrestFactor && vocalRatio < 0.58 else {
+        guard crestFactor >= config.minimumCrestFactor && vocalRatio < 0.68 else {
             return (.ambientRejected, crestFactor, lowRatio, highRatio)
         }
 
-        // Chassis Knock: structural low-mid thump (80–450 Hz dominates over 2.2–4.8 kHz)
-        if lowRatio >= 0.42 && lowRatio > highRatio * 1.25 {
-            return (.chassisKnock, crestFactor, lowRatio, highRatio)
-        }
-
-        // Finger Snap / Clap: crisp upper-mid click (2.2–4.8 kHz dominates)
-        if highRatio >= 0.36 && highRatio >= lowRatio * 0.95 {
+        // Finger Snap / Clap: crisp upper-mid click (2.2–4.8 kHz dominates strongly)
+        if highRatio >= 0.34 && highRatio > lowRatio * 1.15 {
             return (.fingerSnap, crestFactor, lowRatio, highRatio)
         }
 
-        // Fallback structural tap if crest factor is very sharp
-        if crestFactor >= config.minimumCrestFactor * 1.35 {
-            return (lowRatio >= highRatio ? .chassisKnock : .fingerSnap, crestFactor, lowRatio, highRatio)
+        // Chassis Knock: structural low-mid thump on MacBook unibody or desk
+        if lowRatio >= 0.24 {
+            return (.chassisKnock, crestFactor, lowRatio, highRatio)
         }
 
-        return (.ambientRejected, crestFactor, lowRatio, highRatio)
+        return (lowRatio >= highRatio ? .chassisKnock : .fingerSnap, crestFactor, lowRatio, highRatio)
     }
 
     /// Evaluates whether a sequence of impulse timestamps (in seconds) matches a target rhythm ratio profile.

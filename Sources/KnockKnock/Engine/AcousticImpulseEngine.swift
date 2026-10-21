@@ -336,15 +336,16 @@ public final class AcousticImpulseEngine {
                 let t1 = knockPulseTimestamps[knockPulseTimestamps.count - 2]
                 let dt = (t2 - t1) * 1000.0
                 if dt >= config.minDoubleIntervalMs && dt <= config.maxDoubleIntervalMs {
-                    // Wait briefly to allow a 3rd knock for Triple Knock
+                    // Wait briefly (300ms) to allow a 3rd knock for Triple Knock
                     PendingCancel()
-                    let waitMs = UInt64(config.maxDoubleIntervalMs * 0.78)
                     pendingDoubleKnockTask = Task { @MainActor [weak self] in
-                        try? await Task.sleep(for: .milliseconds(waitMs))
+                        try? await Task.sleep(for: .milliseconds(300))
                         guard !Task.isCancelled, let self else { return }
                         self.knockPulseTimestamps.removeAll()
+                        self.allPulseTimestamps.removeAll()
                         self.fireGesture(.doubleKnock, confidence: 0.94, interPulseMs: Int(dt), crestFactor: crestFactor, simulated: false)
                     }
+                    return
                 }
             }
 
@@ -357,13 +358,34 @@ public final class AcousticImpulseEngine {
                 let t1 = snapPulseTimestamps[snapPulseTimestamps.count - 2]
                 let dt = (t2 - t1) * 1000.0
                 if dt >= config.minDoubleIntervalMs && dt <= config.maxDoubleIntervalMs {
+                    PendingCancel()
                     snapPulseTimestamps.removeAll()
+                    allPulseTimestamps.removeAll()
                     fireGesture(.doubleSnap, confidence: 0.95, interPulseMs: Int(dt), crestFactor: crestFactor, simulated: false)
+                    return
                 }
             }
 
         default:
             break
+        }
+
+        // Mixed-impulse fallback (e.g., 1st knock was deep palm-rest thud, 2nd knock had fingernail click)
+        if allPulseTimestamps.count >= 2 {
+            let t2 = allPulseTimestamps[allPulseTimestamps.count - 1]
+            let t1 = allPulseTimestamps[allPulseTimestamps.count - 2]
+            let dt = (t2 - t1) * 1000.0
+            if dt >= config.minDoubleIntervalMs && dt <= config.maxDoubleIntervalMs {
+                PendingCancel()
+                pendingDoubleKnockTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled, let self else { return }
+                    self.knockPulseTimestamps.removeAll()
+                    self.snapPulseTimestamps.removeAll()
+                    self.allPulseTimestamps.removeAll()
+                    self.fireGesture(.doubleKnock, confidence: 0.91, interPulseMs: Int(dt), crestFactor: crestFactor, simulated: false)
+                }
+            }
         }
     }
 
