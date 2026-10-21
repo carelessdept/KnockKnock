@@ -60,6 +60,7 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
 // MARK: - System Actions
 
 public enum SystemActionType: String, CaseIterable, Codable, Identifiable, Sendable {
+    case hudPreviewOnly = "hud_preview_only"
     case playPauseMedia = "play_pause_media"
     case privacyShield = "privacy_shield"
     case muteUnmuteAudio = "mute_unmute_audio"
@@ -74,6 +75,7 @@ public enum SystemActionType: String, CaseIterable, Codable, Identifiable, Senda
 
     public var title: String {
         switch self {
+        case .hudPreviewOnly: return "HUD Banner Only (Safe Test Mode)"
         case .playPauseMedia: return "Play / Pause Media"
         case .privacyShield: return "Liquid Glass Privacy Shield"
         case .muteUnmuteAudio: return "Mute / Unmute System Audio"
@@ -88,6 +90,7 @@ public enum SystemActionType: String, CaseIterable, Codable, Identifiable, Senda
 
     public var shortTitle: String {
         switch self {
+        case .hudPreviewOnly: return "HUD Only"
         case .playPauseMedia: return "Play / Pause"
         case .privacyShield: return "Privacy Shield"
         case .muteUnmuteAudio: return "Mute Audio"
@@ -102,6 +105,7 @@ public enum SystemActionType: String, CaseIterable, Codable, Identifiable, Senda
 
     public var symbolName: String {
         switch self {
+        case .hudPreviewOnly: return "sparkles.rectangle.stack"
         case .playPauseMedia: return "playpause.fill"
         case .privacyShield: return "eye.slash.circle.fill"
         case .muteUnmuteAudio: return "speaker.slash.fill"
@@ -116,6 +120,7 @@ public enum SystemActionType: String, CaseIterable, Codable, Identifiable, Senda
 
     public var tintColor: Color {
         switch self {
+        case .hudPreviewOnly: return Color(nsColor: .systemGreen)
         case .playPauseMedia: return Color(nsColor: .systemBlue)
         case .privacyShield: return Color(nsColor: .systemIndigo)
         case .muteUnmuteAudio: return Color(nsColor: .systemOrange)
@@ -198,23 +203,23 @@ public struct TriggeredEventRecord: Identifiable, Sendable {
 // MARK: - Pure DSP Classification & Cadence Math (Testable & Sendable)
 
 public struct AcousticClassifierConfig: Sendable, Equatable {
-    public var sensitivity: Float = 0.78          // 0.0 ... 1.0
-    public var minimumCrestFactor: Float = 2.5    // Peak-to-RMS ratio for sharp transient
-    public var minDoubleIntervalMs: Double = 85   // Minimum ms between knocks/snaps
-    public var maxDoubleIntervalMs: Double = 650  // Maximum ms between knocks/snaps
-    public var typingSuppressionWindowMs: Double = 120
-    public var cooldownMs: Double = 480
+    public var sensitivity: Float = 0.55          // 0.0 ... 1.0
+    public var minimumCrestFactor: Float = 4.5    // Peak-to-RMS ratio for sharp transient
+    public var minDoubleIntervalMs: Double = 140  // Minimum ms between knocks/snaps
+    public var maxDoubleIntervalMs: Double = 460  // Maximum ms between knocks/snaps
+    public var typingSuppressionWindowMs: Double = 350
+    public var cooldownMs: Double = 1200
 
     /// Normalized relative intervals for the custom secret rhythm (default: 4-beat cadence)
     public var targetRhythmRatios: [Double] = [1.0, 0.52, 0.52]
-    public var rhythmTolerance: Double = 0.34
+    public var rhythmTolerance: Double = 0.18
 
     public init() {}
 
     public var amplitudeGate: Float {
-        // Maps sensitivity (0.1 ... 1.0) -> gate threshold (0.11 ... 0.008) tuned for MacBook built-in mics
+        // Maps sensitivity (0.1 ... 1.0) -> gate threshold (0.22 ... 0.065) so room noise never triggers
         let clamped = max(0.1, min(1.0, sensitivity))
-        return max(0.008, 0.125 - (clamped * 0.12))
+        return max(0.065, 0.24 - (clamped * 0.175))
     }
 }
 

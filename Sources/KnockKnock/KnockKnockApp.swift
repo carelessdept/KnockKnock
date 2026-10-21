@@ -68,20 +68,9 @@ final class KnockKnockAppDelegate: NSObject, NSApplicationDelegate {
             self.hudController.showGestureHUD(for: record)
         }
 
-        engine.startListening()
-
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self else { return }
             self.openSettingsWindow()
-            let welcomeRecord = TriggeredEventRecord(
-                gesture: .doubleKnock,
-                action: self.engine.gestureActions[.doubleKnock] ?? .playPauseMedia,
-                confidence: 0.99,
-                interPulseMs: 210,
-                crestFactor: 8.6,
-                isSimulated: true
-            )
-            self.hudController.showGestureHUD(for: welcomeRecord)
         }
     }
 

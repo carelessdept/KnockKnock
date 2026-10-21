@@ -23,12 +23,12 @@ public final class AcousticImpulseEngine {
     public var lastDetectedGesture: AcousticGestureType?
     public var lastTriggerTimestamp: Date?
 
-    // Gesture -> Action Mappings
+    // Gesture -> Action Mappings (Safe non-intrusive defaults; Privacy Shield / Mission Control opt-in)
     public var gestureActions: [AcousticGestureType: SystemActionType] = [
         .doubleKnock: .playPauseMedia,
-        .doubleSnap: .nextTrack,
-        .tripleKnock: .privacyShield,
-        .secretRhythm: .missionControl
+        .doubleSnap: .hudPreviewOnly,
+        .tripleKnock: .hudPreviewOnly,
+        .secretRhythm: .disabled
     ]
     public var customShortcutName: String = ""
     public var config = AcousticClassifierConfig()
@@ -52,6 +52,8 @@ public final class AcousticImpulseEngine {
     private var allPulseTimestamps: [TimeInterval] = []
     private var lastTriggerTime: TimeInterval = 0
     private var lastImpulseTime: TimeInterval = 0
+    private var rollingAmbientPeak: Float = 0.015
+    private var consecutiveLoudFrames: Int = 0
     private var pendingDoubleKnockTask: Task<Void, Never>?
     private var decayTimer: Timer?
 
@@ -247,9 +249,28 @@ public final class AcousticImpulseEngine {
         let msSinceKey = Self.millisecondsSinceLastUserInput()
         isTypingSuppressed = msSinceKey < config.typingSuppressionWindowMs
 
+        let dynamicGate = max(config.amplitudeGate, rollingAmbientPeak * 4.2)
+        if peak < dynamicGate {
+            // Update quiet ambient baseline and reset consecutive loud frame counter
+            rollingAmbientPeak = min(0.08, max(0.005, rollingAmbientPeak * 0.96 + peak * 0.04))
+            consecutiveLoudFrames = 0
+            return
+        }
+
+        consecutiveLoudFrames += 1
+        // A real physical knock or snap is an isolated transient (< 25ms = 1 frame).
+        // If sound stays loud across 2+ consecutive frames, it is speech, music, or desk noise -> abort!
+        if consecutiveLoudFrames > 1 {
+            PendingCancel()
+            knockPulseTimestamps.removeAll()
+            snapPulseTimestamps.removeAll()
+            allPulseTimestamps.removeAll()
+            return
+        }
+
         let now = ProcessInfo.processInfo.systemUptime
-        // Minimum 95ms refractory window per physical impulse so one knock doesn't double-count
-        guard (now - lastImpulseTime) * 1000.0 >= 95.0 else { return }
+        // Minimum 145ms refractory window per physical impulse so one knock doesn't double-count
+        guard (now - lastImpulseTime) * 1000.0 >= 145.0 else { return }
 
         guard let classified = AcousticSignalMath.classifyImpulse(
             peak: peak,
@@ -500,11 +521,13 @@ public final class AcousticImpulseEngine {
         crestFactor: Double,
         simulated: Bool
     ) {
+        let action = gestureActions[gesture] ?? .disabled
+        guard action != .disabled else { return }
+
         lastTriggerTime = ProcessInfo.processInfo.systemUptime
         lastDetectedGesture = gesture
         lastTriggerTimestamp = Date()
 
-        let action = gestureActions[gesture] ?? .playPauseMedia
         let summary = SystemActionExecutor.shared.execute(action, shortcutName: customShortcutName)
         statusMessage = "\(gesture.title) → \(summary)"
 
@@ -529,9 +552,25 @@ public final class AcousticImpulseEngine {
     // MARK: - Keystroke Suppression & Smooth Visual Decay
 
     private static func millisecondsSinceLastUserInput() -> Double {
-        let keyDownSec = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
-        let leftMouseSec = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .leftMouseDown)
-        return min(keyDownSec, leftMouseSec) * 1000.0
+        let events: [CGEventType] = [
+            .keyDown,
+            .keyUp,
+            .flagsChanged,
+            .leftMouseDown,
+            .leftMouseUp,
+            .rightMouseDown,
+            .mouseMoved,
+            .leftMouseDragged,
+            .scrollWheel
+        ]
+        var minSec = Double.greatestFiniteMagnitude
+        for ev in events {
+            let s = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: ev)
+            if s < minSec {
+                minSec = s
+            }
+        }
+        return minSec * 1000.0
     }
 
     private func startVisualDecayLoop() {

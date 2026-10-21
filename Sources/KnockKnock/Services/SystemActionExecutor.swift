@@ -26,6 +26,9 @@ public final class SystemActionExecutor {
         shortcutName: String = ""
     ) -> String {
         switch action {
+        case .hudPreviewOnly:
+            return "HUD Banner Preview (No System Action)"
+
         case .playPauseMedia:
             sendMediaKey(Self.NX_KEYTYPE_PLAY)
             return "Media Play / Pause Sent"
