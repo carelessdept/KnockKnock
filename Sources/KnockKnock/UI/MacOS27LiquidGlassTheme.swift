@@ -28,6 +28,24 @@ public enum MacOS27Theme {
     public static let labelPrimary = Color(nsColor: .labelColor)
     public static let labelSecondary = Color(nsColor: .secondaryLabelColor)
     public static let labelTertiary = Color(nsColor: .tertiaryLabelColor)
+}
+
+extension AcousticGestureType {
+    public var accentColor: Color {
+        switch self {
+        case .doubleKnock, .leftZoneDoubleKnock, .rightZoneDoubleKnock:
+            return MacOS27Theme.knockAmber
+        case .doubleSnap:
+            return MacOS27Theme.snapTeal
+        case .tripleKnock, .trackpadHoldDoubleKnock:
+            return MacOS27Theme.systemBlue
+        case .secretRhythm, .hingeNudge:
+            return MacOS27Theme.rhythmPurple
+        }
+    }
+}
+
+extension MacOS27Theme {
 
     // Specular Rim Gradients (Top-Lit Solarium Glass Specular Highlight)
     public static var specularRimGradient: LinearGradient {

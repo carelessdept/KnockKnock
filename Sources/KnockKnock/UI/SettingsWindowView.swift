@@ -1,62 +1,72 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
-/// Sidebar panes modeled after macOS 27 System Settings.
+/// Five comprehensive panes fulfilling Part 4.3 (Gesture Studio), Part 4.4 (Signal Laboratory),
+/// Part 6 (Experimental Lab), Part 7 (Profiles & Automation), and Part 1.2/9 (Capability Registry & Privacy).
 public enum KnockKnockSettingsPane: String, CaseIterable, Identifiable {
-    case acousticEngine = "Acoustic Engine"
-    case gestureMappings = "Gesture Mappings"
-    case secretRhythmStudio = "Secret Rhythm Studio"
-    case liveTelemetry = "Impulse Telemetry"
+    case gestureStudio = "Gesture Studio"
+    case rhythmAndExperimental = "Rhythm & Experimental Lab"
+    case profilesAndAutomation = "Profiles & Automation"
+    case signalLab = "Signal Laboratory"
+    case capabilitiesAndPrivacy = "Capabilities & Privacy"
 
     public var id: String { rawValue }
 
     public var subtitle: String {
         switch self {
-        case .acousticEngine:
-            return "Spectral FFT, Crest Factor & Keystroke Guard"
-        case .gestureMappings:
-            return "Double Knock, Snap, Triple Knock & Shortcuts"
-        case .secretRhythmStudio:
-            return "Record & Test Custom 4-Beat Knock Cadences"
-        case .liveTelemetry:
-            return "Real-Time Impulse Classification & Event Log"
+        case .gestureStudio:
+            return "Modality, Guided Calibration & Core Mappings"
+        case .rhythmAndExperimental:
+            return "DTW Rhythms, Spatial Zones & Hinge Sensor"
+        case .profilesAndAutomation:
+            return "Per-App Contexts, Shortcuts & Workflows"
+        case .signalLab:
+            return "Live BMI286 200Hz, Spectral & Latency Telemetry"
+        case .capabilitiesAndPrivacy:
+            return "Hardware Registry, Permissions & Config Export"
         }
     }
 
     public var symbolName: String {
         switch self {
-        case .acousticEngine:
-            return "waveform.badge.magnifyingglass"
-        case .gestureMappings:
+        case .gestureStudio:
             return "hand.tap.fill"
-        case .secretRhythmStudio:
+        case .rhythmAndExperimental:
             return "metronome.fill"
-        case .liveTelemetry:
-            return "chart.xyaxis.line"
+        case .profilesAndAutomation:
+            return "bolt.horizontal.circle.fill"
+        case .signalLab:
+            return "waveform.path.ecg.rectangle.fill"
+        case .capabilitiesAndPrivacy:
+            return "checkmark.shield.fill"
         }
     }
 
     public var badgeGradient: [Color] {
         switch self {
-        case .acousticEngine:
+        case .gestureStudio:
             return [MacOS27Theme.systemBlue, MacOS27Theme.electricCyan]
-        case .gestureMappings:
-            return [MacOS27Theme.knockAmber, Color(red: 1.0, green: 0.38, blue: 0.22)]
-        case .secretRhythmStudio:
+        case .rhythmAndExperimental:
             return [MacOS27Theme.rhythmPurple, MacOS27Theme.systemIndigo]
-        case .liveTelemetry:
+        case .profilesAndAutomation:
+            return [MacOS27Theme.knockAmber, Color(red: 1.0, green: 0.38, blue: 0.22)]
+        case .signalLab:
             return [MacOS27Theme.listeningGreen, MacOS27Theme.snapTeal]
+        case .capabilitiesAndPrivacy:
+            return [MacOS27Theme.systemIndigo, MacOS27Theme.systemBlue]
         }
     }
 }
 
-/// Authentic macOS 27 System Settings window with Liquid Glass cards, squircle sidebar badges,
-/// and interactive acoustic calibration & rhythm recording tools.
 public struct SettingsWindowView: View {
     @Bindable var engine: AcousticImpulseEngine
     let onTriggerAction: (AcousticGestureType) -> Void
     let onTogglePrivacyShield: () -> Void
 
-    @State private var selectedPane: KnockKnockSettingsPane = .acousticEngine
+    @State private var selectedPane: KnockKnockSettingsPane = .gestureStudio
+    @State private var showAdvancedDSPSettings: Bool = false
+    @State private var exportImportStatusMessage: String = ""
 
     public init(
         engine: AcousticImpulseEngine,
@@ -71,20 +81,28 @@ public struct SettingsWindowView: View {
     public var body: some View {
         NavigationSplitView {
             sidebarContent
-                .navigationSplitViewColumnWidth(min: 225, ideal: 240, max: 265)
+                .navigationSplitViewColumnWidth(min: 235, ideal: 250, max: 275)
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     detailHeaderBanner
                     switch selectedPane {
-                    case .acousticEngine:
-                        acousticEnginePane
-                    case .gestureMappings:
-                        gestureMappingsPane
-                    case .secretRhythmStudio:
-                        secretRhythmStudioPane
-                    case .liveTelemetry:
-                        liveTelemetryPane
+                    case .gestureStudio:
+                        gestureStudioPane
+                    case .rhythmAndExperimental:
+                        rhythmAndExperimentalPane
+                    case .profilesAndAutomation:
+                        profilesAndAutomationPane
+                    case .signalLab:
+                        signalLaboratoryPane
+                            .onAppear {
+                                engine.registerVisibleTelemetryConsumer()
+                            }
+                            .onDisappear {
+                                engine.unregisterVisibleTelemetryConsumer()
+                            }
+                    case .capabilitiesAndPrivacy:
+                        capabilitiesAndPrivacyPane
                     }
                 }
                 .padding(24)
@@ -92,9 +110,9 @@ public struct SettingsWindowView: View {
             .background(
                 LinearGradient(
                     colors: [
-                        MacOS27Theme.systemBlue.opacity(0.05),
+                        MacOS27Theme.systemBlue.opacity(0.04),
                         Color.clear,
-                        MacOS27Theme.systemIndigo.opacity(0.04)
+                        MacOS27Theme.systemIndigo.opacity(0.03)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -108,11 +126,10 @@ public struct SettingsWindowView: View {
         )
     }
 
-    // MARK: - Sidebar (macOS 27 System Settings Style)
+    // MARK: - Sidebar
 
     private var sidebarContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // App Identity Card at top of Sidebar
             HStack(spacing: 11) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -128,7 +145,6 @@ public struct SettingsWindowView: View {
                             RoundedRectangle(cornerRadius: 11, style: .continuous)
                                 .strokeBorder(Color.white.opacity(0.45), lineWidth: 0.75)
                         )
-                        .shadow(color: MacOS27Theme.systemBlue.opacity(0.35), radius: 6, y: 2)
 
                     Image(systemName: "waveform.and.magnifyingglass")
                         .font(.system(size: 17, weight: .bold))
@@ -136,7 +152,7 @@ public struct SettingsWindowView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("KnockKnock")
+                    Text("KnockKnock X")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(MacOS27Theme.labelPrimary)
 
@@ -144,7 +160,7 @@ public struct SettingsWindowView: View {
                         Circle()
                             .fill(engine.isListening ? MacOS27Theme.listeningGreen : Color.secondary)
                             .frame(width: 6, height: 6)
-                        Text(engine.isListening ? "Acoustic DSP Active" : "Engine Paused")
+                        Text(engine.isListening ? "Sensing Active" : "Standby (Paused)")
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(MacOS27Theme.labelSecondary)
                     }
@@ -176,9 +192,8 @@ public struct SettingsWindowView: View {
             }
             .listStyle(.sidebar)
 
-            // Quick Simulation Bar at Bottom of Sidebar
             VStack(alignment: .leading, spacing: 7) {
-                Text("QUICK HARDWARE SIMULATOR")
+                Text("DETERMINISTIC TEST TRIGGERS")
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))
                     .tracking(0.6)
                     .foregroundStyle(MacOS27Theme.labelTertiary)
@@ -197,7 +212,7 @@ public struct SettingsWindowView: View {
                     Button {
                         onTriggerAction(.doubleSnap)
                     } label: {
-                        Label("2× Snap", systemImage: "sparkles")
+                        Label("2× Snap", systemImage: "waveform")
                             .font(.system(size: 11, weight: .semibold))
                             .frame(maxWidth: .infinity)
                     }
@@ -209,7 +224,7 @@ public struct SettingsWindowView: View {
         }
     }
 
-    // MARK: - Top Detail Header Banner
+    // MARK: - Top Detail Banner
 
     private var detailHeaderBanner: some View {
         HStack(spacing: 14) {
@@ -235,8 +250,8 @@ public struct SettingsWindowView: View {
                 engine.toggleListening()
             } label: {
                 Label(
-                    engine.isListening ? "Listening Live" : "Start Listening",
-                    systemImage: engine.isListening ? "waveform.circle.fill" : "play.circle.fill"
+                    engine.isListening ? "Pause Sensing" : "Start Sensing",
+                    systemImage: engine.isListening ? "pause.circle.fill" : "play.circle.fill"
                 )
                 .font(.system(size: 12, weight: .semibold))
             }
@@ -252,235 +267,259 @@ public struct SettingsWindowView: View {
         )
     }
 
-    // MARK: - Pane 1: Acoustic Engine & Calibration
+    // MARK: - Pane 1: Gesture Studio & Guided Calibration (Part 4.3)
 
-    private var acousticEnginePane: some View {
+    private var gestureStudioPane: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Real-time Spectral Visualizer & Sub-Band Energy Card
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label("Real-Time Unibody Resonance & Air Transient Analyzer", systemImage: "waveform.path.ecg")
+            // 1. Input Modality & Guided Calibration Card
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Physical Sensing Modality", systemImage: "gyroscope")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(MacOS27Theme.labelPrimary)
 
-                    Spacer()
-
-                    Text(String(format: "Peak %.3f  •  Crest %.1fx  •  Gate %.3f", engine.currentPeak, engine.currentCrestFactor, engine.config.amplitudeGate))
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(MacOS27Theme.labelSecondary)
-                }
-
-                HStack(alignment: .bottom, spacing: 6) {
-                    ForEach(Array(engine.spectrumBands.enumerated()), id: \.offset) { idx, level in
-                        let normalized = Double(min(1.0, max(0.06, level)))
-                        VStack(spacing: 4) {
-                            RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: idx < 6
-                                            ? [MacOS27Theme.knockAmber, MacOS27Theme.systemBlue]
-                                            : [MacOS27Theme.electricCyan, MacOS27Theme.snapTeal],
-                                        startPoint: .bottom,
-                                        endPoint: .top
-                                    )
-                                )
-                                .frame(height: CGFloat(8.0 + normalized * 62.0))
-                                .frame(maxWidth: .infinity)
-                                .animation(.interpolatingSpring(stiffness: 260, damping: 19), value: level)
-
-                            Text(bandLabel(for: idx))
-                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(MacOS27Theme.labelTertiary)
+                    Picker("Modality", selection: Binding(
+                        get: { engine.config.modalityMode },
+                        set: { newMode in
+                            engine.config.modalityMode = newMode
+                            engine.saveConfiguration()
+                            if engine.isListening {
+                                engine.startListening()
+                            }
                         }
-                    }
-                }
-                .frame(height: 86, alignment: .bottom)
-                .padding(.vertical, 4)
-
-                HStack(spacing: 12) {
-                    calibrationMetricPill(
-                        title: "Chassis Thud Band (80–450 Hz)",
-                        value: "\(Int((engine.lowBandLevel * 100).rounded()))%",
-                        subtitle: "Dominant on aluminum unibody knocks",
-                        tint: MacOS27Theme.knockAmber
-                    )
-                    calibrationMetricPill(
-                        title: "Air Snap Band (2.2–4.8 kHz)",
-                        value: "\(Int((engine.highBandLevel * 100).rounded()))%",
-                        subtitle: "Dominant on crisp finger snaps",
-                        tint: MacOS27Theme.snapTeal
-                    )
-                }
-            }
-            .padding(16)
-            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
-
-            // DSP Sliders & Keystroke Immunity Card
-            VStack(alignment: .leading, spacing: 14) {
-                Text("DSP Thresholds & False-Positive Protection")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(MacOS27Theme.labelPrimary)
-
-                sliderRow(
-                    title: "Impulse Sensitivity",
-                    subtitle: "Higher sensitivity detects lighter fingertip taps from further away",
-                    valueText: "\(Int((engine.config.sensitivity * 100).rounded()))%",
-                    value: Binding(
-                        get: { Double(engine.config.sensitivity) },
-                        set: { engine.config.sensitivity = Float($0) }
-                    ),
-                    range: 0.15...0.95
-                )
-
-                Divider().opacity(0.25)
-
-                sliderRow(
-                    title: "Minimum Crest Factor (Peak / RMS)",
-                    subtitle: "Rejects continuous human speech and desk music while passing sharp physical impulses",
-                    valueText: String(format: "%.1fx", engine.config.minimumCrestFactor),
-                    value: Binding(
-                        get: { Double(engine.config.minimumCrestFactor) },
-                        set: { engine.config.minimumCrestFactor = Float($0) }
-                    ),
-                    range: 2.2...8.0
-                )
-
-                Divider().opacity(0.25)
-
-                sliderRow(
-                    title: "Keystroke & Trackpad Immunity Window",
-                    subtitle: "Queries CGEventSource keyboard/mouse state to ignore vibrations while typing",
-                    valueText: "\(Int(engine.config.typingSuppressionWindowMs.rounded())) ms",
-                    value: Binding(
-                        get: { engine.config.typingSuppressionWindowMs },
-                        set: { engine.config.typingSuppressionWindowMs = $0 }
-                    ),
-                    range: 40.0...450.0
-                )
-            }
-            .padding(16)
-            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
-        }
-    }
-
-    // MARK: - Pane 2: Gesture & Action Mappings
-
-    private var gestureMappingsPane: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(AcousticGestureType.allCases) { gesture in
-                let selectedAction = engine.gestureActions[gesture] ?? .disabled
-                HStack(spacing: 14) {
-                    MacOS27SettingsIconBadge(
-                        symbol: gesture.symbolName,
-                        gradientColors: [accentColor(for: gesture), MacOS27Theme.systemIndigo]
-                    )
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 8) {
-                            Text(gesture.title)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                .foregroundStyle(MacOS27Theme.labelPrimary)
-
-                            Text(gesture.frequencyBadge)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(accentColor(for: gesture))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(
-                                    Capsule(style: .continuous)
-                                        .fill(accentColor(for: gesture).opacity(0.15))
-                                )
-                        }
-
-                        Text(gesture.subtitle)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(MacOS27Theme.labelSecondary)
-                    }
-
-                    Spacer()
-
-                    Picker("", selection: Binding(
-                        get: { engine.gestureActions[gesture] ?? .disabled },
-                        set: { engine.gestureActions[gesture] = $0 }
                     )) {
-                        ForEach(SystemActionType.allCases) { action in
-                            Label(action.title, systemImage: action.symbolName)
-                                .tag(action)
+                        ForEach(SensorModalityMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
                         }
                     }
                     .labelsHidden()
-                    .frame(width: 215)
 
-                    Button {
-                        onTriggerAction(gesture)
-                    } label: {
-                        Label("Trigger Now", systemImage: "bolt.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .disabled(selectedAction == .disabled)
+                    Text(engine.config.modalityMode.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(MacOS27Theme.labelSecondary)
                 }
                 .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Guided Hardware Calibration", systemImage: "scope")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        Spacer()
+                        Text(String(format: "Gate %.3fg", engine.config.effectiveMotionJerkGateG))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(MacOS27Theme.electricCyan)
+                    }
+
+                    Text(engine.calibrationStatusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(MacOS27Theme.labelSecondary)
+                        .lineLimit(2)
+
+                    HStack(spacing: 8) {
+                        Button {
+                            if engine.isCalibratingKnocks {
+                                engine.cancelGuidedCalibration()
+                            } else {
+                                engine.startGuidedKnockCalibration()
+                            }
+                        } label: {
+                            Label(
+                                engine.isCalibratingKnocks
+                                    ? "Cancel Calibration (\(engine.calibrationRecordedJerks.count)/4)"
+                                    : "Calibrate 4 Chassis Knocks",
+                                systemImage: engine.isCalibratingKnocks ? "xmark.circle.fill" : "hand.tap.fill"
+                            )
+                            .font(.system(size: 11.5, weight: .semibold))
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(engine.isCalibratingKnocks ? MacOS27Theme.knockAmber : MacOS27Theme.systemBlue)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .macOS27GlassCard(
                     cornerRadius: MacOS27Theme.tileCornerRadius,
-                    tint: selectedAction != .disabled ? accentColor(for: gesture) : nil,
-                    isActive: selectedAction != .disabled,
-                    isInteractive: true
+                    tint: engine.isCalibratingKnocks ? MacOS27Theme.knockAmber : nil,
+                    isActive: engine.isCalibratingKnocks
                 )
             }
 
-            // Custom macOS Shortcut Name Card + Privacy Shield Test Card
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("macOS Shortcuts Integration", systemImage: "square.stack.3d.up.fill")
-                        .font(.system(size: 12.5, weight: .semibold))
+            // 2. Core Gesture Mappings
+            Text("Core Physical Gestures")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
 
-                    Text("When a gesture is mapped to “Run macOS Shortcut”, KnockKnock invokes `/usr/bin/shortcuts run` with this name:")
-                        .font(.system(size: 11))
-                        .foregroundStyle(MacOS27Theme.labelSecondary)
-
-                    TextField("Shortcut Name (e.g. Focus Mode)", text: $engine.customShortcutName)
-                        .textFieldStyle(.roundedBorder)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Instant Liquid Glass Privacy Shield", systemImage: "eye.slash.circle.fill")
-                        .font(.system(size: 12.5, weight: .semibold))
-
-                    Text("Covers your workspace in a full-screen macOS 27 `NSGlassEffectView` refraction shield (`Esc` or click to dismiss).")
-                        .font(.system(size: 11))
-                        .foregroundStyle(MacOS27Theme.labelSecondary)
-
-                    Button {
-                        onTogglePrivacyShield()
-                    } label: {
-                        Label("Toggle Full-Screen Privacy Shield", systemImage: "sparkles.rectangle.stack.fill")
-                            .font(.system(size: 11.5, weight: .semibold))
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(MacOS27Theme.rhythmPurple)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
+            ForEach(AcousticGestureType.coreGestures) { gesture in
+                gestureMappingRow(for: gesture)
             }
+
+            // 3. Conflict Notice if Double Knock & Triple Knock are both enabled
+            if (engine.gestureActions[.doubleKnock] ?? .disabled) != .disabled &&
+               (engine.gestureActions[.tripleKnock] ?? .disabled) != .disabled {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.trianglebadge.exclamationmark")
+                        .foregroundStyle(MacOS27Theme.electricCyan)
+                    Text("Arbitration Active: Because both Double Knock and Triple Knock are enabled, KnockKnock X waits a 270 ms disambiguation window after a 2nd knock so a 3rd knock never triggers both actions.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(MacOS27Theme.labelSecondary)
+                }
+                .padding(12)
+                .macOS27GlassCard(cornerRadius: 12)
+            }
+
+            // 4. Progressive Disclosure: Advanced Recognition & Suppression Thresholds
+            DisclosureGroup(isExpanded: $showAdvancedDSPSettings) {
+                VStack(alignment: .leading, spacing: 14) {
+                    sliderRow(
+                        title: "Impact Sensitivity",
+                        subtitle: "Controls how light a physical tap is detected vs. stronger deliberate knocks",
+                        valueText: "\(Int((engine.config.sensitivity * 100).rounded()))%",
+                        value: Binding(
+                            get: { Double(engine.config.sensitivity) },
+                            set: {
+                                engine.config.sensitivity = Float($0)
+                                engine.saveConfiguration()
+                            }
+                        ),
+                        range: 0.15...0.95
+                    )
+
+                    Divider().opacity(0.25)
+
+                    sliderRow(
+                        title: "Minimum Classification Confidence",
+                        subtitle: "Higher reliability requires cleaner cadence timing and stronger sensor agreement",
+                        valueText: "\(Int((engine.config.minimumConfidence * 100).rounded()))%",
+                        value: Binding(
+                            get: { engine.config.minimumConfidence },
+                            set: {
+                                engine.config.minimumConfidence = $0
+                                engine.saveConfiguration()
+                            }
+                        ),
+                        range: 0.50...0.95
+                    )
+
+                    Divider().opacity(0.25)
+
+                    sliderRow(
+                        title: "Keyboard, Mouse & Trackpad Suppression Window",
+                        subtitle: "Suppresses impacts within this window after typing, clicking, dragging, or scrolling",
+                        valueText: "\(Int(engine.config.typingSuppressionWindowMs.rounded())) ms",
+                        value: Binding(
+                            get: { engine.config.typingSuppressionWindowMs },
+                            set: {
+                                engine.config.typingSuppressionWindowMs = $0
+                                engine.saveConfiguration()
+                            }
+                        ),
+                        range: 80.0...600.0
+                    )
+
+                    Divider().opacity(0.25)
+
+                    sliderRow(
+                        title: "Post-Execution Cooldown Window",
+                        subtitle: "Prevents duplicate executions after a command fires",
+                        valueText: "\(Int(engine.config.cooldownMs.rounded())) ms",
+                        value: Binding(
+                            get: { engine.config.cooldownMs },
+                            set: {
+                                engine.config.cooldownMs = $0
+                                engine.saveConfiguration()
+                            }
+                        ),
+                        range: 400.0...2500.0
+                    )
+                }
+                .padding(.top, 10)
+            } label: {
+                Label("Advanced Recognition & False-Positive Suppression", systemImage: "tuningfork")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+            .padding(14)
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
         }
     }
 
-    // MARK: - Pane 3: Secret Rhythm Studio
+    private func gestureMappingRow(for gesture: AcousticGestureType) -> some View {
+        let selectedAction = engine.gestureActions[gesture] ?? .disabled
+        return HStack(spacing: 14) {
+            MacOS27SettingsIconBadge(
+                symbol: gesture.symbolName,
+                gradientColors: [gesture.accentColor, MacOS27Theme.systemIndigo]
+            )
 
-    private var secretRhythmStudioPane: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(gesture.title)
+                        .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(MacOS27Theme.labelPrimary)
+
+                    Text(gesture.frequencyBadge)
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(gesture.accentColor)
+                        .padding(.horizontal, 6.5)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(gesture.accentColor.opacity(0.15))
+                        )
+                }
+
+                Text(gesture.subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(MacOS27Theme.labelSecondary)
+            }
+
+            Spacer()
+
+            Picker("", selection: Binding(
+                get: { engine.gestureActions[gesture] ?? .disabled },
+                set: {
+                    engine.gestureActions[gesture] = $0
+                    engine.saveConfiguration()
+                }
+            )) {
+                ForEach(SystemActionType.allCases) { action in
+                    Label(action.title, systemImage: action.symbolName)
+                        .tag(action)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 225)
+
+            Button {
+                onTriggerAction(gesture)
+            } label: {
+                Label("Test", systemImage: "bolt.fill")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .disabled(selectedAction == .disabled)
+        }
+        .padding(13)
+        .macOS27GlassCard(
+            cornerRadius: MacOS27Theme.tileCornerRadius,
+            tint: selectedAction != .disabled ? gesture.accentColor : nil,
+            isActive: selectedAction != .disabled,
+            isInteractive: true
+        )
+    }
+
+    // MARK: - Pane 2: Rhythm Studio & Experimental Interaction Lab (Part 5.4 & Part 6)
+
+    private var rhythmAndExperimentalPane: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // 1. Custom 4-Beat DTW Rhythm Studio
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("4-Beat Tempo-Invariant Cadence Signature")
+                        Text("Custom Rhythm Recorder (Normalized DTW Cadence)")
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        Text("KnockKnock normalizes the 3 inter-tap intervals between 4 knocks (\(engine.rhythmPatternDescription)) so your secret rhythm works whether tapped fast or slow.")
+                        Text("Current pattern: \(engine.rhythmPatternDescription). Works across fast and slow tempos.")
                             .font(.system(size: 11.5))
                             .foregroundStyle(MacOS27Theme.labelSecondary)
                     }
@@ -490,6 +529,7 @@ public struct SettingsWindowView: View {
                     Button {
                         engine.config.targetRhythmRatios = [1.0, 0.52, 0.52]
                         engine.rhythmPatternDescription = "4-Beat Classic (1.0× · 0.52× · 0.52×)"
+                        engine.saveConfiguration()
                     } label: {
                         Label("Reset Default", systemImage: "arrow.counterclockwise")
                             .font(.system(size: 11, weight: .semibold))
@@ -498,12 +538,11 @@ public struct SettingsWindowView: View {
                     .controlSize(.small)
                 }
 
-                // Visual Interval Proportion Bars
                 HStack(spacing: 10) {
                     ForEach(Array(engine.config.targetRhythmRatios.enumerated()), id: \.offset) { index, ratio in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text("Interval \(index + 1) (Beat \(index + 1) → \(index + 2))")
+                                Text("Beat \(index + 1) → \(index + 2)")
                                     .font(.system(size: 10.5, weight: .semibold))
                                     .foregroundStyle(MacOS27Theme.labelSecondary)
                                 Spacer()
@@ -529,28 +568,22 @@ public struct SettingsWindowView: View {
                             }
                             .frame(height: 8)
                         }
-                        .padding(12)
+                        .padding(11)
                         .macOS27GlassCard(cornerRadius: 12)
                     }
                 }
 
-                // Interactive Recording Studio Pad
-                HStack(spacing: 14) {
+                HStack(spacing: 12) {
                     Button {
                         engine.recordManualRhythmBeat()
                     } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: engine.isRecordingRhythm ? "hand.tap.fill" : "record.circle.fill")
-                                .font(.system(size: 16, weight: .bold))
-                            Text(
-                                engine.isRecordingRhythm
-                                    ? "Tap Next Beat (\(engine.recordedTapTimestamps.count) / 4)"
-                                    : "Record 4-Beat Rhythm by Tapping Here"
-                            )
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
+                        Label(
+                            engine.isRecordingRhythm
+                                ? "Tap Next Beat (\(engine.recordedTapTimestamps.count) / 4)"
+                                : "Record 4-Beat Rhythm by Tapping Here",
+                            systemImage: engine.isRecordingRhythm ? "hand.tap.fill" : "record.circle.fill"
+                        )
+                        .font(.system(size: 12.5, weight: .semibold))
                     }
                     .buttonStyle(.glassProminent)
                     .tint(engine.isRecordingRhythm ? MacOS27Theme.knockAmber : MacOS27Theme.rhythmPurple)
@@ -567,160 +600,511 @@ public struct SettingsWindowView: View {
                     Button {
                         onTriggerAction(.secretRhythm)
                     } label: {
-                        Label("Simulate Secret Rhythm", systemImage: "sparkles")
-                            .font(.system(size: 12, weight: .semibold))
+                        Label("Test Custom Rhythm", systemImage: "sparkles")
+                            .font(.system(size: 11.5, weight: .semibold))
                     }
                     .buttonStyle(.glass)
                 }
             }
             .padding(16)
-            .macOS27GlassCard(
-                cornerRadius: MacOS27Theme.tileCornerRadius,
-                tint: MacOS27Theme.rhythmPurple,
-                isActive: engine.isRecordingRhythm,
-                isInteractive: true
-            )
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
+
+            // 2. Experimental Interaction Lab (Part 6)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Experimental Interaction Lab (Part 6 Research Candidates)", systemImage: "flask.fill")
+                        .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                    Spacer()
+                    Text("OPT-IN EXPERIMENTAL")
+                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(MacOS27Theme.knockAmber)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(MacOS27Theme.knockAmber.opacity(0.15)))
+                }
+
+                Toggle(isOn: Binding(
+                    get: { engine.config.enableExperimentalSpatialZones },
+                    set: {
+                        engine.config.enableExperimentalSpatialZones = $0
+                        engine.saveConfiguration()
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("6.1 Broad Spatial Knock Zones (Left vs. Right Palm Rest)")
+                            .font(.system(size: 12.5, weight: .semibold))
+                        Text("Uses Bosch BMI286 gyroscope roll torque sign to distinguish Left vs. Right palm-rest double knocks on a flat desk. Does not claim centimeter precision.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacOS27Theme.labelSecondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Divider().opacity(0.25)
+
+                Toggle(isOn: Binding(
+                    get: { engine.config.enableExperimentalHingeDial },
+                    set: {
+                        engine.config.enableExperimentalHingeDial = $0
+                        engine.saveConfiguration()
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 8) {
+                            Text("6.3 Hinge Dial (Apple SPU ma981 Lid Angle Sensor)")
+                                .font(.system(size: 12.5, weight: .semibold))
+                            if engine.motionService.lidAngleDegrees > 0 {
+                                Text("Live Angle: \(Int(engine.motionService.lidAngleDegrees))°")
+                                    .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(MacOS27Theme.electricCyan)
+                            }
+                        }
+                        Text("Triggers only on non-destructive actions when you deliberately nudge the screen lid by 4°–8°.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MacOS27Theme.labelSecondary)
+                    }
+                }
+                .toggleStyle(.switch)
+            }
+            .padding(16)
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
+
+            if engine.config.enableExperimentalSpatialZones || engine.config.enableExperimentalHingeDial {
+                ForEach(AcousticGestureType.experimentalGestures) { expGesture in
+                    gestureMappingRow(for: expGesture)
+                }
+            }
         }
     }
 
-    // MARK: - Pane 4: Live Impulse & Event Telemetry
+    // MARK: - Pane 3: Application Profiles & Automation (Part 7)
 
-    private var liveTelemetryPane: some View {
+    private var profilesAndAutomationPane: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Recent Triggered Gestures (\(engine.triggerHistory.count))")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            Text("Application-Specific Gesture Profiles (Active: \(engine.activeProfileName))")
+                .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+
+            ForEach(Array(engine.appProfiles.enumerated()), id: \.element.id) { index, profile in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Toggle(isOn: Binding(
+                            get: { engine.appProfiles[index].isEnabled },
+                            set: {
+                                engine.appProfiles[index].isEnabled = $0
+                                engine.saveConfiguration()
+                            }
+                        )) {
+                            HStack(spacing: 8) {
+                                Text(profile.displayName)
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(profile.bundleIdentifier)
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .foregroundStyle(MacOS27Theme.labelTertiary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+
+                        Spacer()
+
+                        Picker("Double Knock:", selection: Binding(
+                            get: { engine.appProfiles[index].mappings[.doubleKnock] ?? .playPauseMedia },
+                            set: {
+                                engine.appProfiles[index].mappings[.doubleKnock] = $0
+                                engine.saveConfiguration()
+                            }
+                        )) {
+                            ForEach(SystemActionType.allCases) { act in
+                                Text(act.shortTitle).tag(act)
+                            }
+                        }
+                        .frame(width: 210)
+                    }
+                }
+                .padding(13)
+                .macOS27GlassCard(cornerRadius: 12)
+            }
+
+            // Automation Targets Card
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Configured Automation Targets")
+                    .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("macOS Shortcut Name")
+                            .font(.system(size: 11, weight: .semibold))
+                        TextField("e.g. Focus Mode", text: Binding(
+                            get: { engine.config.customShortcutName },
+                            set: {
+                                engine.config.customShortcutName = $0
+                                engine.saveConfiguration()
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Target Application Path")
+                            .font(.system(size: 11, weight: .semibold))
+                        TextField("/System/Applications/Music.app", text: Binding(
+                            get: { engine.config.targetApplicationPath },
+                            set: {
+                                engine.config.targetApplicationPath = $0
+                                engine.saveConfiguration()
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Target URL (http/https validated)")
+                            .font(.system(size: 11, weight: .semibold))
+                        TextField("https://...", text: Binding(
+                            get: { engine.config.targetURLString },
+                            set: {
+                                engine.config.targetURLString = $0
+                                engine.saveConfiguration()
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("User-Approved AppleScript")
+                            .font(.system(size: 11, weight: .semibold))
+                        TextField("AppleScript source", text: Binding(
+                            get: { engine.config.customAppleScript },
+                            set: {
+                                engine.config.customAppleScript = $0
+                                engine.saveConfiguration()
+                            }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+                }
+
+                Divider().opacity(0.25)
+
+                Toggle(isOn: Binding(
+                    get: { engine.config.enableShellAutomationOptIn },
+                    set: {
+                        engine.config.enableShellAutomationOptIn = $0
+                        engine.saveConfiguration()
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Explicit Opt-In: Allow User-Configured Shell Workflow Execution")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Disabled by default for security (Part 9). Never runs downloaded or external commands.")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(MacOS27Theme.labelSecondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if engine.config.enableShellAutomationOptIn {
+                    TextField("Shell command", text: Binding(
+                        get: { engine.config.customShellCommand },
+                        set: {
+                            engine.config.customShellCommand = $0
+                            engine.saveConfiguration()
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                }
+            }
+            .padding(16)
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
+        }
+    }
+
+    // MARK: - Pane 4: Signal Laboratory (Part 4.4 — Auto-pauses when not visible)
+
+    private var signalLaboratoryPane: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // 1. Real Hardware Sensor & Mach Performance Telemetry Strip
+            HStack(spacing: 10) {
+                metricTile(
+                    title: "BMI286 Accel Jerk",
+                    value: String(format: "%.4f g", engine.currentMotionJerkG),
+                    subtitle: String(format: "Sample Rate: %.0f Hz", engine.motionService.accelSampleRateHz),
+                    tint: MacOS27Theme.knockAmber
+                )
+                metricTile(
+                    title: "BMI286 Gyro Roll",
+                    value: String(format: "%+.2f °/s", engine.currentGyroRollDegPerSec),
+                    subtitle: "Zone: \(engine.currentSpatialZone.rawValue)",
+                    tint: MacOS27Theme.electricCyan
+                )
+                metricTile(
+                    title: "ma981 Lid Angle",
+                    value: engine.motionService.lidAngleDegrees > 0
+                        ? String(format: "%.0f°", engine.motionService.lidAngleDegrees)
+                        : "Standby",
+                    subtitle: engine.motionService.isLidMoving ? "Hinge Moving (Suppressed)" : "Hinge Stable",
+                    tint: MacOS27Theme.rhythmPurple
+                )
+                metricTile(
+                    title: "Mach Process Telemetry",
+                    value: String(format: "%.1f%% CPU · %.1f MB", engine.performanceMonitor.processCPUPercent, engine.performanceMonitor.residentMemoryMB),
+                    subtitle: String(format: "DSP %.0f µs · Latency %.0f ms", engine.performanceMonitor.meanCallbackMicros, engine.performanceMonitor.lastRecognitionLatencyMs),
+                    tint: MacOS27Theme.listeningGreen
+                )
+            }
+
+            // 2. 16-Band Spectrum & Acoustic Feature Card
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Live 16-Band Spectral & Transient Envelope (Active Only While Signal Lab Visible)", systemImage: "waveform.path.ecg")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Spacer()
+                    Text(String(format: "Peak %.3f · RMS %.4f · Crest %.1fx · Centroid %.0f Hz · Flux %.2f", engine.currentPeak, engine.currentRMS, engine.currentCrestFactor, engine.currentCentroidHz, engine.currentSpectralFlux))
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(MacOS27Theme.labelSecondary)
+                }
+
+                HStack(alignment: .bottom, spacing: 6) {
+                    ForEach(Array(engine.spectrumBands.enumerated()), id: \.offset) { idx, level in
+                        let normalized = Double(min(1.0, max(0.06, level)))
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: idx < 6
+                                        ? [MacOS27Theme.knockAmber, MacOS27Theme.systemBlue]
+                                        : [MacOS27Theme.electricCyan, MacOS27Theme.snapTeal],
+                                    startPoint: .bottom,
+                                    endPoint: .top
+                                )
+                            )
+                            .frame(height: CGFloat(8.0 + normalized * 56.0))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: 68, alignment: .bottom)
+            }
+            .padding(14)
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
+
+            // 3. False-Positive Suppression & Rejection Counters
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("9-Stage False-Positive Suppression Counters (Total Suppressed: \(engine.performanceMonitor.suppressedEventsCount))")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Spacer()
+                    Button("Clear Telemetry") {
+                        engine.recentImpulses.removeAll()
+                        engine.triggerHistory.removeAll()
+                        engine.rejectionCounts.removeAll()
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                }
+
+                HStack(spacing: 8) {
+                    ForEach([
+                        RejectionReason.typingOrMouseActive,
+                        .sustainedAudioRejected,
+                        .insufficientMotionJerk,
+                        .cooldownActive,
+                        .conflictArbitrated
+                    ], id: \.self) { reason in
+                        let cnt = engine.rejectionCounts[reason, default: 0]
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(cnt)")
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(MacOS27Theme.electricCyan)
+                            Text(reason.rawValue.replacingOccurrences(of: "Suppressed: ", with: "").replacingOccurrences(of: "Rejected: ", with: ""))
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(MacOS27Theme.labelSecondary)
+                                .lineLimit(1)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                    }
+                }
+            }
+            .padding(14)
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
+
+            // 4. Candidate Impulses Log
+            Text("Captured Candidate Impulses (\(engine.recentImpulses.count))")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+
+            if engine.recentImpulses.isEmpty {
+                Text("No impulses captured yet. Start Sensing and tap your MacBook palm rest or click a deterministic test button in the sidebar.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(MacOS27Theme.labelSecondary)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .macOS27GlassCard(cornerRadius: 12)
+            } else {
+                ForEach(engine.recentImpulses.prefix(8)) { sample in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(sample.rejectionReason == .accepted ? MacOS27Theme.listeningGreen : MacOS27Theme.knockAmber)
+                            .frame(width: 8, height: 8)
+
+                        Text(sample.kind.rawValue)
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 210, alignment: .leading)
+
+                        Text(String(format: "Jerk %.3fg · Roll %+.1f°/s · Crest %.1fx", sample.motionJerkG, sample.gyroRollDegPerSec, sample.crestFactor))
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(MacOS27Theme.labelSecondary)
+
+                        Spacer()
+
+                        Text(sample.spatialZone.rawValue)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(MacOS27Theme.electricCyan)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .macOS27GlassCard(cornerRadius: 10)
+                }
+            }
+        }
+    }
+
+    // MARK: - Pane 5: Capability Registry, Privacy & Configuration Export/Import (Part 1.2 & Part 9)
+
+    private var capabilitiesAndPrivacyPane: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // 1. Machine Environment Summary
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Detected Hardware Environment: \(engine.capabilities.cpuBrandString) (\(engine.capabilities.macModelIdentifier))")
+                        .font(.system(size: 13.5, weight: .bold, design: .rounded))
+                    Text("OS: \(engine.capabilities.osVersionString) · Memory: \(engine.capabilities.physicalMemoryGB) GB · Offline-First Transient Processing (Zero Network Entitlements)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(MacOS27Theme.labelSecondary)
+                }
                 Spacer()
-                Button {
-                    engine.triggerHistory.removeAll()
-                    engine.recentImpulses.removeAll()
-                } label: {
-                    Label("Clear Telemetry", systemImage: "trash")
-                        .font(.system(size: 11, weight: .semibold))
+                Button("Re-Probe Hardware") {
+                    engine.capabilities.refreshHardwareAndPermissions()
                 }
                 .buttonStyle(.glass)
                 .controlSize(.small)
             }
+            .padding(14)
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
 
-            if engine.triggerHistory.isEmpty {
-                HStack(spacing: 10) {
-                    Image(systemName: "waveform.badge.magnifyingglass")
-                        .font(.system(size: 16))
-                        .foregroundStyle(MacOS27Theme.labelSecondary)
-                    Text("No gestures triggered yet in this session. Knock twice on your MacBook or click “Trigger Now” to populate live telemetry.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(MacOS27Theme.labelSecondary)
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(engine.triggerHistory.prefix(6)) { event in
-                        HStack(spacing: 12) {
-                            Image(systemName: event.gesture.symbolName)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(accentColor(for: event.gesture))
-                                .frame(width: 28, height: 28)
-                                .background(
-                                    Circle().fill(accentColor(for: event.gesture).opacity(0.16))
-                                )
-
-                            VStack(alignment: .leading, spacing: 1.5) {
-                                Text("\(event.gesture.title) → \(event.action.title)")
-                                    .font(.system(size: 12.5, weight: .semibold))
-                                Text("Confidence \(Int((event.confidence * 100).rounded()))%  •  Gap \(event.interPulseMs) ms  •  Crest \(String(format: "%.1fx", event.crestFactor))")
-                                    .font(.system(size: 10.5))
-                                    .foregroundStyle(MacOS27Theme.labelSecondary)
-                            }
-
-                            Spacer()
-
-                            Text(event.timestamp, style: .time)
-                                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(MacOS27Theme.labelTertiary)
-                        }
-                        .padding(10)
-                        .macOS27GlassCard(cornerRadius: 12)
-                    }
-                }
-            }
-
-            Text("Classified Acoustic Impulses (\(engine.recentImpulses.count))")
+            // 2. Capability Registry Table
+            Text("Runtime Capability & Verification Registry (Part 1.2)")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .padding(.top, 4)
 
-            if engine.recentImpulses.isEmpty {
-                Text("Waiting for physical chassis knocks or finger snaps…")
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacOS27Theme.labelSecondary)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(engine.recentImpulses.prefix(10)) { sample in
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(sampleColor(for: sample.kind))
-                                .frame(width: 8, height: 8)
+            ForEach(engine.capabilities.capabilities) { cap in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(cap.name)
+                            .font(.system(size: 12.5, weight: .semibold))
+                        Spacer()
+                        Text(cap.verificationStage.rawValue.uppercased())
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(MacOS27Theme.systemBlue.opacity(0.16)))
+                            .foregroundStyle(MacOS27Theme.electricCyan)
 
-                            Text(sample.kind.rawValue)
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .frame(width: 140, alignment: .leading)
-
-                            Text(String(format: "Peak %.2f  •  Crest %.1fx", sample.peakAmplitude, sample.crestFactor))
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundStyle(MacOS27Theme.labelSecondary)
-
-                            Spacer()
-
-                            Text(
-                                String(
-                                    format: "Knock %d%% / Snap %d%%",
-                                    Int((sample.lowBandRatio * 100).rounded()),
-                                    Int((sample.highBandRatio * 100).rounded())
-                                )
-                            )
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(MacOS27Theme.labelSecondary)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .macOS27GlassCard(cornerRadius: 10)
+                        Text(cap.status.rawValue)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(cap.status == .available ? MacOS27Theme.listeningGreen : MacOS27Theme.knockAmber)
                     }
+                    Text("\(cap.apiOrAccessMethod) · Permission: \(cap.requiredPermission)")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(MacOS27Theme.labelSecondary)
+                    Text("Behavior: \(cap.testedBehavior) | Fallback: \(cap.fallbackStrategy)")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(MacOS27Theme.labelTertiary)
+                }
+                .padding(11)
+                .macOS27GlassCard(cornerRadius: 11)
+            }
+
+            // 3. Privacy, Battery & Configuration Export/Import
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: Binding(
+                    get: { engine.config.pauseOnBatteryPower },
+                    set: {
+                        engine.config.pauseOnBatteryPower = $0
+                        engine.saveConfiguration()
+                    }
+                )) {
+                    Text("Automatically Pause Sensing on Battery Power")
+                        .font(.system(size: 12.5, weight: .semibold))
+                }
+                .toggleStyle(.switch)
+
+                HStack(spacing: 10) {
+                    Button {
+                        exportConfigurationToFile()
+                    } label: {
+                        Label("Export Configuration JSON…", systemImage: "square.and.arrow.up")
+                            .font(.system(size: 11.5, weight: .semibold))
+                    }
+                    .buttonStyle(.glass)
+
+                    Button {
+                        importConfigurationFromFile()
+                    } label: {
+                        Label("Import & Validate JSON…", systemImage: "square.and.arrow.down")
+                            .font(.system(size: 11.5, weight: .semibold))
+                    }
+                    .buttonStyle(.glass)
+
+                    Button {
+                        engine.resetCalibrationAndLearnedGestures()
+                    } label: {
+                        Label("Reset Calibration & Learned Rhythms", systemImage: "trash")
+                            .font(.system(size: 11.5, weight: .semibold))
+                    }
+                    .buttonStyle(.glass)
+
+                    Spacer()
+
+                    Button {
+                        onTogglePrivacyShield()
+                    } label: {
+                        Label("Test Visual Privacy Overlay", systemImage: "eye.slash.circle.fill")
+                            .font(.system(size: 11.5, weight: .semibold))
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(MacOS27Theme.rhythmPurple)
+                }
+
+                if !exportImportStatusMessage.isEmpty {
+                    Text(exportImportStatusMessage)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacOS27Theme.electricCyan)
                 }
             }
+            .padding(14)
+            .macOS27GlassCard(cornerRadius: MacOS27Theme.tileCornerRadius)
         }
     }
 
     // MARK: - Helpers
 
-    private func calibrationMetricPill(title: String, value: String, subtitle: String, tint: Color) -> some View {
+    private func metricTile(title: String, value: String, subtitle: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(MacOS27Theme.labelSecondary)
-                Spacer()
-                Text(value)
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundStyle(tint)
-            }
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(MacOS27Theme.labelSecondary)
+            Text(value)
+                .font(.system(size: 13.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(tint)
+                .lineLimit(1)
             Text(subtitle)
-                .font(.system(size: 10))
+                .font(.system(size: 9.5))
                 .foregroundStyle(MacOS27Theme.labelTertiary)
+                .lineLimit(1)
         }
-        .padding(11)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(tint.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .strokeBorder(tint.opacity(0.28), lineWidth: 0.6)
-                )
-        )
+        .macOS27GlassCard(cornerRadius: 12)
     }
 
     private func sliderRow(
@@ -749,38 +1133,36 @@ public struct SettingsWindowView: View {
         }
     }
 
-    private func bandLabel(for index: Int) -> String {
-        let labels = [
-            "80", "120", "180", "260", "350", "450",
-            "650", "900", "1.2k", "1.6k", "2.2k", "2.8k",
-            "3.4k", "4.1k", "4.8k", "6.0k"
-        ]
-        return labels[index % labels.count]
-    }
-
-    private func accentColor(for gesture: AcousticGestureType) -> Color {
-        switch gesture {
-        case .doubleKnock:
-            return MacOS27Theme.knockAmber
-        case .doubleSnap:
-            return MacOS27Theme.snapTeal
-        case .tripleKnock:
-            return MacOS27Theme.systemBlue
-        case .secretRhythm:
-            return MacOS27Theme.rhythmPurple
+    private func exportConfigurationToFile() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "KnockKnockX-Configuration.json"
+        if panel.runModal() == .OK, let url = panel.url {
+            let bundle = PersistedConfigurationBundle(
+                config: engine.config,
+                globalMappings: engine.gestureActions,
+                appProfiles: engine.appProfiles
+            )
+            if let data = try? ConfigurationStore.exportJSONData(bundle) {
+                try? data.write(to: url)
+                exportImportStatusMessage = "Exported configuration to \(url.lastPathComponent)"
+            }
         }
     }
 
-    private func sampleColor(for kind: ImpulseKind) -> Color {
-        switch kind {
-        case .chassisKnock:
-            return MacOS27Theme.knockAmber
-        case .fingerSnap:
-            return MacOS27Theme.snapTeal
-        case .typingSuppressed:
-            return MacOS27Theme.systemIndigo
-        case .ambientRejected:
-            return .secondary
+    private func importConfigurationFromFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) {
+            let result = ConfigurationStore.decodeAndValidate(data: data)
+            engine.config = result.bundle.config
+            engine.gestureActions = result.bundle.globalMappings
+            engine.appProfiles = result.bundle.appProfiles
+            engine.saveConfiguration()
+            exportImportStatusMessage = result.warnings.isEmpty
+                ? "Imported configuration cleanly from \(url.lastPathComponent)."
+                : "Imported with validation adjustments: \(result.warnings.joined(separator: " "))"
         }
     }
 }

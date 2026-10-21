@@ -29,6 +29,10 @@ struct KnockKnockApp: App {
                 onOpenSettings: {
                     appDelegate.openSettingsWindow()
                 },
+                onStartCalibration: {
+                    appDelegate.openSettingsWindow()
+                    appDelegate.engine.startGuidedKnockCalibration()
+                },
                 onTriggerAction: { gesture in
                     appDelegate.handleGestureTrigger(gesture)
                 },
@@ -59,6 +63,15 @@ final class KnockKnockAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+
+        SystemActionExecutor.shared.onTogglePrivacyShield = { [weak self] in
+            guard let self else { return }
+            self.hudController.togglePrivacyShield(engine: self.engine)
+        }
+        SystemActionExecutor.shared.onToggleMainWindow = { [weak self] in
+            guard let self else { return }
+            self.openSettingsWindow()
+        }
 
         engine.onGestureTriggered = { [weak self] record in
             guard let self else { return }

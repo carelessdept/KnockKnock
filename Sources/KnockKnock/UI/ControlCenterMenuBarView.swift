@@ -1,23 +1,27 @@
 import SwiftUI
 
-/// Authentic macOS 27 Control Center Liquid Glass popover panel for KnockKnock.
-/// Every card, pill, hairline rim border, tint, and typography follows the macOS 27 Liquid Glass design system.
+/// Part 4.1: Menu Bar Companion — Persistent macOS 27 Liquid Glass interface.
+/// Automatically registers/unregisters telemetry visibility so zero rendering occurs when closed.
 public struct ControlCenterMenuBarView: View {
     @Bindable var engine: AcousticImpulseEngine
     let onOpenSettings: () -> Void
+    let onStartCalibration: () -> Void
     let onTriggerAction: (AcousticGestureType) -> Void
     let onTogglePrivacyShield: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var glassMorphNamespace
 
     public init(
         engine: AcousticImpulseEngine,
         onOpenSettings: @escaping () -> Void,
+        onStartCalibration: @escaping () -> Void = {},
         onTriggerAction: @escaping (AcousticGestureType) -> Void,
         onTogglePrivacyShield: @escaping () -> Void
     ) {
         self.engine = engine
         self.onOpenSettings = onOpenSettings
+        self.onStartCalibration = onStartCalibration
         self.onTriggerAction = onTriggerAction
         self.onTogglePrivacyShield = onTogglePrivacyShield
     }
@@ -26,6 +30,7 @@ public struct ControlCenterMenuBarView: View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 headerHeroModule
+                sensorStatusAndModalityStrip
                 liveSpectralStripModule
                 bentoGestureGridModule
                 sensitivityModule
@@ -44,15 +49,21 @@ public struct ControlCenterMenuBarView: View {
                 )
                 LinearGradient(
                     colors: [
-                        MacOS27Theme.electricCyan.opacity(engine.isListening ? 0.08 : 0.02),
+                        MacOS27Theme.electricCyan.opacity(engine.isListening ? 0.07 : 0.02),
                         Color.clear,
-                        MacOS27Theme.systemIndigo.opacity(engine.isListening ? 0.06 : 0.01)
+                        MacOS27Theme.systemIndigo.opacity(engine.isListening ? 0.05 : 0.01)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             }
         )
+        .onAppear {
+            engine.registerVisibleTelemetryConsumer()
+        }
+        .onDisappear {
+            engine.unregisterVisibleTelemetryConsumer()
+        }
     }
 
     // MARK: - 1. Top Control Center Hero Pill
@@ -60,8 +71,12 @@ public struct ControlCenterMenuBarView: View {
     private var headerHeroModule: some View {
         HStack(spacing: 12) {
             Button {
-                withAnimation(.spring(duration: 0.32, bounce: 0.2)) {
+                if reduceMotion {
                     engine.toggleListening()
+                } else {
+                    withAnimation(.spring(duration: 0.30, bounce: 0.18)) {
+                        engine.toggleListening()
+                    }
                 }
             } label: {
                 ZStack {
@@ -91,28 +106,22 @@ public struct ControlCenterMenuBarView: View {
                                     lineWidth: 0.75
                                 )
                         )
-                        .shadow(
-                            color: engine.isListening ? MacOS27Theme.systemBlue.opacity(0.42) : .clear,
-                            radius: 8,
-                            y: 2
-                        )
 
-                    Image(systemName: engine.isListening ? "waveform.badge.magnifyingglass" : "mic.slash.fill")
+                    Image(systemName: engine.isListening ? "waveform.badge.magnifyingglass" : "pause.circle.fill")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(.white)
-                        .symbolEffect(.pulse.byLayer, isActive: engine.isListening)
                 }
             }
             .buttonStyle(.plain)
-            .help(engine.isListening ? "Pause Acoustic Impulse Engine" : "Start Acoustic Impulse Engine")
+            .accessibilityLabel(engine.isListening ? "Pause Physical Sensing" : "Resume Physical Sensing")
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("KnockKnock")
+                    Text("KnockKnock X")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(MacOS27Theme.labelPrimary)
 
-                    Text("macOS 27")
+                    Text(engine.activeProfileName)
                         .font(.system(size: 9.5, weight: .bold, design: .rounded))
                         .foregroundStyle(MacOS27Theme.electricCyan)
                         .padding(.horizontal, 5.5)
@@ -125,17 +134,18 @@ public struct ControlCenterMenuBarView: View {
                                         .strokeBorder(MacOS27Theme.electricCyan.opacity(0.40), lineWidth: 0.5)
                                 )
                         )
+                        .lineLimit(1)
                 }
 
                 Text(engine.statusMessage)
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(MacOS27Theme.labelSecondary)
                     .lineLimit(1)
             }
 
             Spacer(minLength: 4)
 
-            Toggle("", isOn: Binding(
+            Toggle("Sensing Active", isOn: Binding(
                 get: { engine.isListening },
                 set: { newValue in
                     if newValue != engine.isListening {
@@ -158,7 +168,76 @@ public struct ControlCenterMenuBarView: View {
         .glassEffectID("heroModule", in: glassMorphNamespace)
     }
 
-    // MARK: - 2. Real-Time 16-Band Spectral & Crest Strip
+    // MARK: - 1b. Hardware Sensor Availability & Modality Strip
+
+    private var sensorStatusAndModalityStrip: some View {
+        HStack(spacing: 6) {
+            sensorBadge(
+                label: "BMI286 200Hz",
+                active: engine.motionService.isRunning || engine.capabilities.hasSPUAccelerometer,
+                symbol: "gyroscope"
+            )
+            sensorBadge(
+                label: engine.motionService.lidAngleDegrees > 0
+                    ? "Lid \(Int(engine.motionService.lidAngleDegrees))°"
+                    : "Lid Sensor",
+                active: engine.capabilities.hasLidAngleSensor,
+                symbol: "laptopcomputer"
+            )
+            sensorBadge(
+                label: engine.config.modalityMode == .accelerometerPrimary ? "Mic Off" : "48kHz Mic",
+                active: engine.config.modalityMode != .accelerometerPrimary && engine.microphoneAuthorized,
+                symbol: engine.config.modalityMode == .accelerometerPrimary ? "mic.slash" : "mic.fill"
+            )
+            Spacer(minLength: 2)
+            Menu {
+                ForEach(SensorModalityMode.allCases) { mode in
+                    Button {
+                        engine.config.modalityMode = mode
+                        engine.saveConfiguration()
+                        if engine.isListening {
+                            engine.startListening()
+                        }
+                    } label: {
+                        Label(mode.title, systemImage: mode == .accelerometerPrimary ? "gyroscope" : "waveform")
+                    }
+                }
+            } label: {
+                Text(engine.config.modalityMode == .accelerometerPrimary ? "Motion Only" : "Fusion")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(MacOS27Theme.labelPrimary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .macOS27GlassCard(
+            cornerRadius: 11,
+            tint: nil,
+            isActive: false,
+            isInteractive: true
+        )
+    }
+
+    private func sensorBadge(label: String, active: Bool, symbol: String) -> some View {
+        HStack(spacing: 3.5) {
+            Image(systemName: symbol)
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(active ? MacOS27Theme.listeningGreen : Color.secondary)
+            Text(label)
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(active ? MacOS27Theme.labelPrimary : MacOS27Theme.labelTertiary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            Capsule(style: .continuous)
+                .fill(active ? MacOS27Theme.listeningGreen.opacity(0.12) : Color.secondary.opacity(0.08))
+        )
+    }
+
+    // MARK: - 2. Real-Time 16-Band Spectral & Motion Jerk Strip
 
     private var liveSpectralStripModule: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -167,25 +246,24 @@ public struct ControlCenterMenuBarView: View {
                     .fill(engine.isListening ? MacOS27Theme.listeningGreen : Color.secondary.opacity(0.45))
                     .frame(width: 6.5, height: 6.5)
 
-                Text("CHASSIS & AIR TRANSIENT SPECTRUM")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .tracking(0.5)
+                Text("MOTION JERK & ACOUSTIC TRANSIENTS")
+                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                    .tracking(0.4)
                     .foregroundStyle(MacOS27Theme.labelSecondary)
 
                 Spacer()
 
                 if engine.isTypingSuppressed {
-                    Label("Keystroke Guard", systemImage: "keyboard.badge.ellipsis")
-                        .font(.system(size: 10, weight: .semibold))
+                    Label("Input Guard", systemImage: "keyboard.badge.ellipsis")
+                        .font(.system(size: 9.5, weight: .semibold))
                         .foregroundStyle(MacOS27Theme.knockAmber)
                 } else {
-                    Text(String(format: "Crest %.1fx", max(1.0, Double(engine.currentCrestFactor))))
-                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    Text(String(format: "Jerk %.3fg · Crest %.1fx", engine.currentMotionJerkG, Double(engine.currentCrestFactor)))
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                         .foregroundStyle(MacOS27Theme.labelSecondary)
                 }
             }
 
-            // 16-Band Liquid Glass Spectrum Visualizer
             HStack(alignment: .bottom, spacing: 4) {
                 ForEach(Array(engine.spectrumBands.enumerated()), id: \.offset) { idx, level in
                     let normalized = Double(min(1.0, max(0.08, level)))
@@ -200,23 +278,21 @@ public struct ControlCenterMenuBarView: View {
                                 endPoint: .top
                             )
                         )
-                        .frame(height: CGFloat(6.0 + normalized * 28.0))
+                        .frame(height: CGFloat(6.0 + normalized * 26.0))
                         .frame(maxWidth: .infinity)
-                        .animation(.interpolatingSpring(stiffness: 260, damping: 20), value: level)
                 }
             }
-            .frame(height: 35, alignment: .bottom)
+            .frame(height: 33, alignment: .bottom)
             .padding(.horizontal, 4)
 
-            // Dual Sub-Band Energy Pill Meters (80-450 Hz Knock vs 2.2-4.8 kHz Snap)
             HStack(spacing: 10) {
                 subBandMeter(
-                    title: "Knock (80–450 Hz)",
-                    value: Double(engine.lowBandLevel),
+                    title: "Chassis Motion / Knock",
+                    value: Double(max(engine.lowBandLevel, Float(min(1.0, engine.currentMotionJerkG * 8.0)))),
                     tint: MacOS27Theme.knockAmber
                 )
                 subBandMeter(
-                    title: "Snap (2.2–4.8 kHz)",
+                    title: "Air Transient / Snap",
                     value: Double(engine.highBandLevel),
                     tint: MacOS27Theme.snapTeal
                 )
@@ -256,24 +332,25 @@ public struct ControlCenterMenuBarView: View {
         }
     }
 
-    // MARK: - 3. 2x2 Bento Gesture Grid (macOS 27 Control Center Tiles)
+    // MARK: - 3. 2x2 Bento Gesture Grid (Core 4 Gestures)
 
     private var bentoGestureGridModule: some View {
-        LazyVGrid(
+        let primaryFour: [AcousticGestureType] = [.doubleKnock, .doubleSnap, .tripleKnock, .secretRhythm]
+        return LazyVGrid(
             columns: [
                 GridItem(.flexible(), spacing: 8),
                 GridItem(.flexible(), spacing: 8)
             ],
             spacing: 8
         ) {
-            ForEach(AcousticGestureType.allCases) { gesture in
+            ForEach(primaryFour) { gesture in
                 bentoGestureTile(for: gesture)
             }
         }
     }
 
     private func bentoGestureTile(for gesture: AcousticGestureType) -> some View {
-        let currentAction = engine.gestureActions[gesture] ?? .disabled
+        let currentAction = engine.effectiveAction(for: gesture)
         let isEnabled = currentAction != .disabled
         let accentColor = accentColor(for: gesture)
 
@@ -281,11 +358,7 @@ public struct ControlCenterMenuBarView: View {
             HStack(alignment: .top) {
                 ZStack {
                     Circle()
-                        .fill(
-                            isEnabled
-                                ? accentColor.opacity(0.22)
-                                : Color.secondary.opacity(0.12)
-                        )
+                        .fill(isEnabled ? accentColor.opacity(0.22) : Color.secondary.opacity(0.12))
                         .frame(width: 28, height: 28)
                         .overlay(
                             Circle()
@@ -329,7 +402,7 @@ public struct ControlCenterMenuBarView: View {
                     .lineLimit(1)
 
                 Text(gesture.frequencyBadge)
-                    .font(.system(size: 9.0, weight: .medium, design: .monospaced))
+                    .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(MacOS27Theme.labelTertiary)
                     .lineLimit(1)
             }
@@ -338,6 +411,7 @@ public struct ControlCenterMenuBarView: View {
                 ForEach(SystemActionType.allCases) { actionOption in
                     Button {
                         engine.gestureActions[gesture] = actionOption
+                        engine.saveConfiguration()
                     } label: {
                         Label(actionOption.title, systemImage: actionOption.symbolName)
                     }
@@ -382,19 +456,19 @@ public struct ControlCenterMenuBarView: View {
         )
     }
 
-    // MARK: - 4. Sensitivity & Crest Control Slider Pill
+    // MARK: - 4. Sensitivity & Reliability Slider Pill
 
     private var sensitivityModule: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Label("Impulse Sensitivity", systemImage: "slider.horizontal.below.waveform")
+                Label("Impact Sensitivity", systemImage: "slider.horizontal.below.waveform")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(MacOS27Theme.labelPrimary)
 
                 Spacer()
 
-                Text("\(Int((engine.config.sensitivity * 100).rounded()))%")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text(String(format: "%d%% (Gate %.3fg)", Int((engine.config.sensitivity * 100).rounded()), engine.config.effectiveMotionJerkGateG))
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(MacOS27Theme.electricCyan)
             }
 
@@ -403,6 +477,7 @@ public struct ControlCenterMenuBarView: View {
                     get: { Double(engine.config.sensitivity) },
                     set: { newVal in
                         engine.config.sensitivity = Float(newVal)
+                        engine.saveConfiguration()
                     }
                 ),
                 in: 0.15...0.95
@@ -420,18 +495,18 @@ public struct ControlCenterMenuBarView: View {
         )
     }
 
-    // MARK: - 5. Latest Triggered Event / Simulation Strip
+    // MARK: - 5. Recent Triggered Action Strip
 
     private var recentImpulseFooterModule: some View {
         HStack(spacing: 8) {
             if let latest = engine.triggerHistory.first {
-                Image(systemName: latest.action.symbolName)
+                Image(systemName: latest.actionSucceeded ? latest.action.symbolName : "exclamationmark.triangle.fill")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(MacOS27Theme.electricCyan)
+                    .foregroundStyle(latest.actionSucceeded ? MacOS27Theme.electricCyan : MacOS27Theme.knockAmber)
                     .frame(width: 24, height: 24)
                     .background(
                         Circle()
-                            .fill(MacOS27Theme.electricCyan.opacity(0.16))
+                            .fill((latest.actionSucceeded ? MacOS27Theme.electricCyan : MacOS27Theme.knockAmber).opacity(0.16))
                     )
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -440,7 +515,7 @@ public struct ControlCenterMenuBarView: View {
                         .foregroundStyle(MacOS27Theme.labelPrimary)
                         .lineLimit(1)
 
-                    Text("\(latest.interPulseMs) ms gap · Crest \(String(format: "%.1fx", latest.crestFactor))")
+                    Text(String(format: "%.0f%% conf · %.0f ms latency · %@", latest.confidence * 100, latest.recognitionLatencyMs, latest.spatialZone.rawValue))
                         .font(.system(size: 9.5, weight: .regular))
                         .foregroundStyle(MacOS27Theme.labelSecondary)
                         .lineLimit(1)
@@ -451,7 +526,7 @@ public struct ControlCenterMenuBarView: View {
                     .foregroundStyle(MacOS27Theme.labelSecondary)
                     .frame(width: 24, height: 24)
 
-                Text("Knock twice on your MacBook palm rest or click ▶ on any tile to test.")
+                Text("Click Start Sensing, then double-knock on your MacBook palm rest.")
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(MacOS27Theme.labelSecondary)
                     .lineLimit(2)
@@ -469,14 +544,15 @@ public struct ControlCenterMenuBarView: View {
         )
     }
 
-    // MARK: - 6. Bottom Control Center Action Bar
+    // MARK: - 6. Bottom Action Bar (Calibrate, Studio/Lab, Quit)
 
     private var controlCenterActionBar: some View {
         HStack(spacing: 8) {
             Button {
-                onTogglePrivacyShield()
+                onStartCalibration()
+                onOpenSettings()
             } label: {
-                Label("Privacy Shield", systemImage: "eye.slash.circle.fill")
+                Label("Calibrate", systemImage: "scope")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(maxWidth: .infinity)
             }
@@ -486,7 +562,7 @@ public struct ControlCenterMenuBarView: View {
             Button {
                 onOpenSettings()
             } label: {
-                Label("Settings…", systemImage: "gearshape.fill")
+                Label("Gesture Studio…", systemImage: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(maxWidth: .infinity)
             }
@@ -502,19 +578,19 @@ public struct ControlCenterMenuBarView: View {
             }
             .buttonStyle(.glass)
             .controlSize(.small)
-            .help("Quit KnockKnock")
+            .help("Quit KnockKnock X")
         }
     }
 
     private func accentColor(for gesture: AcousticGestureType) -> Color {
         switch gesture {
-        case .doubleKnock:
+        case .doubleKnock, .leftZoneDoubleKnock, .rightZoneDoubleKnock:
             return MacOS27Theme.knockAmber
         case .doubleSnap:
             return MacOS27Theme.snapTeal
-        case .tripleKnock:
+        case .tripleKnock, .trackpadHoldDoubleKnock:
             return MacOS27Theme.systemBlue
-        case .secretRhythm:
+        case .secretRhythm, .hingeNudge:
             return MacOS27Theme.rhythmPurple
         }
     }

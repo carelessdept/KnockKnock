@@ -19,7 +19,8 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Accelerate"),
                 .linkedFramework("CoreGraphics"),
-                .linkedFramework("ApplicationServices")
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("IOKit")
             ]
         ),
         .testTarget(
