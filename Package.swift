@@ -13,6 +13,9 @@ let package = Package(
         .executableTarget(
             name: "KnockKnock",
             path: "Sources/KnockKnock",
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("AppKit"),

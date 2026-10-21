@@ -26,13 +26,14 @@ public struct PersistedConfigurationBundle: Codable, Sendable, Equatable {
     public static var defaultGlobalMappings: [AcousticGestureType: SystemActionType] {
         [
             .doubleKnock: .playPauseMedia,
-            .tripleKnock: .hudPreviewOnly,
-            .doubleSnap: .hudPreviewOnly,
-            .secretRhythm: .disabled,
-            .trackpadHoldDoubleKnock: .muteUnmuteAudio,
+            .tripleKnock: .lockScreen,
+            .doubleSnap: .muteUnmuteAudio,
+            .knockPlusSnap: .privacyShield,
+            .trackpadHoldDoubleKnock: .openSpotlight,
+            .secretRhythm: .openChatGPT,
             .leftZoneDoubleKnock: .previousTrack,
             .rightZoneDoubleKnock: .nextTrack,
-            .hingeNudge: .disabled
+            .hingeNudge: .missionControl
         ]
     }
 
@@ -75,7 +76,7 @@ public struct PersistedConfigurationBundle: Codable, Sendable, Equatable {
 }
 
 public enum ConfigurationStore {
-    private static let storageKey = "com.carelessdept.KnockKnockX.configuration.v2"
+    private static let storageKey = "com.carelessdept.Reson.configuration.v3"
 
     public static func load(from defaults: UserDefaults = .standard) -> (bundle: PersistedConfigurationBundle, warnings: [String]) {
         guard let data = defaults.data(forKey: storageKey) else {

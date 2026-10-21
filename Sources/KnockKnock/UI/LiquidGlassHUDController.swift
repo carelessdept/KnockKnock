@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Part 4.2: Dynamic Notch HUD & Visual Privacy Overlay
+// MARK: - Reson Floating Smoked-Glass HUD Pill & Privacy Shield Overlay
 
 @MainActor
 public final class LiquidGlassHUDController {
@@ -9,90 +9,69 @@ public final class LiquidGlassHUDController {
 
     private var hudPanel: NSPanel?
     private var dismissTask: Task<Void, Never>?
-    private var privacyShieldWindow: NSPanel?
-    public var isPrivacyShieldActive: Bool = false
+    private var privacyShieldPanel: NSPanel?
+    public private(set) var isPrivacyShieldActive: Bool = false
 
     private init() {}
-
-    // MARK: - Dynamic Notch Liquid Glass HUD Pill
 
     public func showGestureHUD(for record: TriggeredEventRecord) {
         dismissTask?.cancel()
 
-        let hudView = MacOS27NotchHUDPillView(record: record)
-        let hostingView = NSHostingView(rootView: hudView)
-        let pillSize = CGSize(width: 410, height: 68)
-        hostingView.frame = CGRect(origin: .zero, size: pillSize)
-
-        let screen = NSScreen.main ?? NSScreen.screens.first
-        let screenFrame = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let targetX = screenFrame.midX - (pillSize.width / 2)
-        let targetY = screenFrame.maxY - pillSize.height - 12
-
         if hudPanel == nil {
             let panel = NSPanel(
-                contentRect: CGRect(x: targetX, y: targetY + 14, width: pillSize.width, height: pillSize.height),
+                contentRect: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: MacOS27Theme.floatingHUDWidth,
+                    height: MacOS27Theme.floatingHUDHeight
+                ),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
-            panel.hasShadow = false
+            panel.isFloatingPanel = true
             panel.level = .statusBar
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-            // Part 4.2: Never intercept mouse clicks or steal focus
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = false
             panel.ignoresMouseEvents = true
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             hudPanel = panel
         }
 
         guard let panel = hudPanel else { return }
-        panel.contentView = hostingView
+        let hudView = ResonFloatingHUDPillView(record: record)
+        panel.contentView = NSHostingView(rootView: hudView)
 
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if reduceMotion {
-            panel.alphaValue = 1.0
-            panel.setFrame(CGRect(x: targetX, y: targetY, width: pillSize.width, height: pillSize.height), display: true)
-            panel.orderFrontRegardless()
-        } else {
-            panel.alphaValue = 0.0
-            panel.setFrame(CGRect(x: targetX, y: targetY + 14, width: pillSize.width, height: pillSize.height), display: true)
-            panel.orderFrontRegardless()
+        if let screen = NSScreen.main {
+            let visible = screen.visibleFrame
+            let x = visible.midX - (MacOS27Theme.floatingHUDWidth / 2)
+            let y = visible.maxY - MacOS27Theme.floatingHUDHeight - 16
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        }
 
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.24
-                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1.0)
-                panel.animator().alphaValue = 1.0
-                panel.animator().setFrame(
-                    CGRect(x: targetX, y: targetY, width: pillSize.width, height: pillSize.height),
-                    display: true
-                )
-            }
+        panel.alphaValue = 0.0
+        panel.orderFrontRegardless()
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1.0
         }
 
         dismissTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(2.2))
+            try? await Task.sleep(for: .milliseconds(2100))
             guard !Task.isCancelled, let self, let panel = self.hudPanel else { return }
-            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                panel.orderOut(nil)
-            } else {
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.20
-                    panel.animator().alphaValue = 0.0
-                    panel.animator().setFrame(
-                        CGRect(x: targetX, y: targetY + 10, width: pillSize.width, height: pillSize.height),
-                        display: true
-                    )
-                } completionHandler: {
-                    Task { @MainActor in
-                        panel.orderOut(nil)
-                    }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.25
+                panel.animator().alphaValue = 0.0
+            }, completionHandler: {
+                Task { @MainActor in
+                    panel.orderOut(nil)
                 }
-            }
+            })
         }
     }
-
-    // MARK: - Full-Screen macOS 27 Liquid Glass Visual Privacy Overlay
 
     public func togglePrivacyShield(engine: AcousticImpulseEngine) {
         if isPrivacyShieldActive {
@@ -103,224 +82,184 @@ public final class LiquidGlassHUDController {
     }
 
     public func presentPrivacyShield(engine: AcousticImpulseEngine) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        isPrivacyShieldActive = true
-
-        let shieldView = MacOS27PrivacyShieldOverlayView(
-            engine: engine,
-            onUnlock: { [weak self] in
-                self?.dismissPrivacyShield()
-            }
-        )
-
-        let glassBackdrop = NSGlassEffectView(frame: screen.frame)
-        glassBackdrop.style = .regular
-        glassBackdrop.cornerRadius = 0
-        if #available(macOS 27.0, *) {
-            glassBackdrop.effectIsInteractive = true
+        guard let screen = NSScreen.main else { return }
+        if privacyShieldPanel == nil {
+            let panel = NSPanel(
+                contentRect: screen.frame,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isFloatingPanel = true
+            panel.level = .screenSaver
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            privacyShieldPanel = panel
         }
 
-        let hosting = NSHostingView(rootView: shieldView)
-        hosting.frame = screen.frame
-        hosting.autoresizingMask = [.width, .height]
-        glassBackdrop.contentView = hosting
-
-        let panel = NSPanel(
-            contentRect: screen.frame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
+        guard let panel = privacyShieldPanel else { return }
+        panel.setFrame(screen.frame, display: true)
+        panel.contentView = NSHostingView(
+            rootView: PrivacyShieldOverlayView(
+                onDismiss: { [weak self] in
+                    self?.dismissPrivacyShield()
+                }
+            )
         )
-        panel.isOpaque = false
-        panel.backgroundColor = NSColor.black.withAlphaComponent(0.32)
-        panel.level = .screenSaver
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = glassBackdrop
         panel.alphaValue = 0.0
         panel.orderFrontRegardless()
-        privacyShieldWindow = panel
+        isPrivacyShieldActive = true
 
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.22
+            ctx.duration = 0.25
             panel.animator().alphaValue = 1.0
         }
     }
 
     public func dismissPrivacyShield() {
+        guard let panel = privacyShieldPanel else { return }
         isPrivacyShieldActive = false
-        guard let panel = privacyShieldWindow else { return }
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.20
             panel.animator().alphaValue = 0.0
-        } completionHandler: { [weak self] in
+        }, completionHandler: {
             Task { @MainActor in
                 panel.orderOut(nil)
-                self?.privacyShieldWindow = nil
             }
-        }
+        })
     }
 }
 
-// MARK: - macOS 27 Dynamic Notch HUD Pill SwiftUI View
+// MARK: - Reson Smoked-Glass Neon-Rimmed HUD Pill (Matches Reference Design)
 
-private struct MacOS27NotchHUDPillView: View {
+private struct ResonFloatingHUDPillView: View {
     let record: TriggeredEventRecord
-    @State private var pulse: Bool = false
+
+    private var glowColor: Color {
+        switch record.gesture {
+        case .doubleKnock, .doubleSnap:
+            return Color(red: 0.24, green: 0.62, blue: 1.00)
+        case .tripleKnock, .secretRhythm:
+            return Color(red: 0.96, green: 0.68, blue: 0.24)
+        case .knockPlusSnap, .trackpadHoldDoubleKnock, .leftZoneDoubleKnock, .rightZoneDoubleKnock, .hingeNudge:
+            return Color(red: 0.68, green: 0.42, blue: 1.00)
+        }
+    }
 
     var body: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    record.gesture.accentColor,
-                                    record.gesture.accentColor.opacity(0.65)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 38, height: 38)
-                        .shadow(color: record.gesture.accentColor.opacity(0.45), radius: 8, x: 0, y: 2)
+        HStack(spacing: 14) {
+            // Left Circular Glossy Badge with Reson R))) Logo
+            ResonBrandMark(size: 42, showDarkBadge: true, glowColor: glowColor)
 
-                    Image(systemName: record.actionSucceeded ? record.gesture.symbolName : "exclamationmark.triangle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
+            // Center Headline + Action Subtitle
+            VStack(alignment: .leading, spacing: 2) {
+                Text(record.gesture.hudHeadline)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(record.gesture.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-
-                        Text(record.spatialZone != .any ? record.spatialZone.rawValue.uppercased() : record.gesture.frequencyBadge)
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(record.gesture.accentColor.opacity(0.18), in: Capsule())
-                            .foregroundStyle(record.gesture.accentColor)
-                    }
-
-                    HStack(spacing: 5) {
-                        Image(systemName: record.action.symbolName)
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(record.executionSummary)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 4)
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(String(format: "%.0f ms", record.recognitionLatencyMs))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.primary)
-                    Text(String(format: "%.0f%% CONF", record.confidence * 100))
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(Color.primary.opacity(0.06), in: Capsule())
+                Text(record.action.shortTitle)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.68))
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .glassEffect(
-                .regular.tint(record.gesture.accentColor.opacity(0.12)).interactive(),
-                in: Capsule()
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(MacOS27Theme.activeSpecularRimGradient, lineWidth: 1.0)
-            )
-            .shadow(color: .black.opacity(0.28), radius: 16, x: 0, y: 8)
+
+            Spacer(minLength: 8)
+
+            // Right Circular Smoked Glass Action Icon
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
+                    )
+
+                Image(systemName: record.action.symbolName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
         }
-        .padding(4)
-        .onAppear {
-            pulse.toggle()
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .frame(width: MacOS27Theme.floatingHUDWidth - 16, height: MacOS27Theme.floatingHUDHeight - 10)
+        .background {
+            ZStack {
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.14, green: 0.16, blue: 0.23).opacity(0.94),
+                                Color(red: 0.10, green: 0.11, blue: 0.16).opacity(0.96)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+
+                // Neon left rim glow matching the reference mockup
+                Capsule(style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                glowColor.opacity(0.95),
+                                glowColor.opacity(0.35),
+                                Color.white.opacity(0.15)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            }
+            .shadow(color: glowColor.opacity(0.38), radius: 12, x: -4, y: 2)
+            .shadow(color: Color.black.opacity(0.35), radius: 14, x: 0, y: 6)
         }
     }
 }
 
-// MARK: - Full-Screen macOS 27 Liquid Glass Visual Privacy Shield View
-
-private struct MacOS27PrivacyShieldOverlayView: View {
-    var engine: AcousticImpulseEngine
-    let onUnlock: () -> Void
+private struct PrivacyShieldOverlayView: View {
+    let onDismiss: () -> Void
 
     var body: some View {
         ZStack {
-            RadialGradient(
-                colors: [
-                    Color(nsColor: .systemIndigo).opacity(0.22),
-                    Color(nsColor: .systemBlue).opacity(0.10),
-                    Color.black.opacity(0.35)
-                ],
-                center: .center,
-                startRadius: 40,
-                endRadius: 650
-            )
-            .ignoresSafeArea()
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
 
-            GlassEffectContainer(spacing: 18) {
-                VStack(spacing: 18) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color(nsColor: .systemIndigo), Color(nsColor: .systemBlue)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 68, height: 68)
-                            .shadow(color: Color(nsColor: .systemIndigo).opacity(0.5), radius: 14, x: 0, y: 5)
+            Color(red: 0.06, green: 0.08, blue: 0.14).opacity(0.86)
+                .ignoresSafeArea()
 
-                        Image(systemName: "eye.slash.circle.fill")
-                            .font(.system(size: 32, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
+            VStack(spacing: 18) {
+                ResonBrandMark(size: 72, showDarkBadge: true, glowColor: MacOS27Theme.rhythmGold)
 
-                    VStack(spacing: 6) {
-                        Text("Visual Privacy Overlay Active")
-                            .font(.system(size: 21, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
+                Text("Reson Privacy Shield Active")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
 
-                        Text("Covers your workspace from shoulder-surfing. Press Esc or click below to dismiss.")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 390)
+                Text("Knock again or click below to restore your workspace.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.72))
 
-                        // Part 7 Explicit Security Disclosure
-                        Text("Security Note: Visual covering only — does not conceal content from system screenshots, screen recording, or privileged accessibility processes.")
-                            .font(.system(size: 10.5, weight: .regular))
-                            .foregroundStyle(.tertiary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: 400)
-                            .padding(.top, 2)
-                    }
-
-                    Button(action: onUnlock) {
-                        Label("Dismiss Privacy Overlay (Esc)", systemImage: "lock.open.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(Color(nsColor: .systemBlue))
-                    .keyboardShortcut(.escape, modifiers: [])
+                Button(action: onDismiss) {
+                    Text("Dismiss Privacy Shield")
+                        .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 10)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(MacOS27Theme.primaryBlue)
+                        )
                 }
-                .padding(32)
-                .frame(width: 470)
-                .macOS27GlassCard(cornerRadius: 28, tint: Color(nsColor: .systemIndigo).opacity(0.10), highlighted: true)
+                .buttonStyle(.plain)
+                .padding(.top, 6)
             }
+        }
+        .onTapGesture {
+            onDismiss()
         }
     }
 }

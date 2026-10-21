@@ -119,8 +119,9 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
     case doubleKnock = "double_knock"
     case tripleKnock = "triple_knock"
     case doubleSnap = "double_snap"
-    case secretRhythm = "secret_rhythm"
+    case knockPlusSnap = "knock_plus_snap"
     case trackpadHoldDoubleKnock = "trackpad_hold_double_knock"
+    case secretRhythm = "secret_rhythm"
     case leftZoneDoubleKnock = "left_zone_double_knock"
     case rightZoneDoubleKnock = "right_zone_double_knock"
     case hingeNudge = "hinge_nudge"
@@ -132,11 +133,26 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
         case .doubleKnock: return "Double Knock"
         case .tripleKnock: return "Triple Knock"
         case .doubleSnap: return "Double Snap"
+        case .knockPlusSnap: return "Knock + Snap"
+        case .trackpadHoldDoubleKnock: return "Trackpad Hold"
         case .secretRhythm: return "Custom Rhythm"
-        case .trackpadHoldDoubleKnock: return "Trackpad Hold + Double Knock"
-        case .leftZoneDoubleKnock: return "Left Palm-Rest Double Knock"
-        case .rightZoneDoubleKnock: return "Right Palm-Rest Double Knock"
-        case .hingeNudge: return "Hinge Dial Nudge (±4°)"
+        case .leftZoneDoubleKnock: return "Left Zone Knock"
+        case .rightZoneDoubleKnock: return "Right Zone Knock"
+        case .hingeNudge: return "Hinge Nudge (±4°)"
+        }
+    }
+
+    public var hudHeadline: String {
+        switch self {
+        case .doubleKnock: return "Double Knock"
+        case .tripleKnock: return "Knock-Knock-Knock"
+        case .doubleSnap: return "Snap-Snap"
+        case .knockPlusSnap: return "Knock + Snap"
+        case .trackpadHoldDoubleKnock: return "Trackpad Hold"
+        case .secretRhythm: return "Custom Rhythm"
+        case .leftZoneDoubleKnock: return "Left Knock-Knock"
+        case .rightZoneDoubleKnock: return "Right Knock-Knock"
+        case .hingeNudge: return "Hinge Nudge"
         }
     }
 
@@ -145,6 +161,7 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
         case .doubleKnock: return "2× Deliberate Chassis Tap · BMI286 + Audio Fusion"
         case .tripleKnock: return "3× Rapid Chassis Tap · Structural Impulse"
         case .doubleSnap: return "2× Crisp Air Impulse · 2.2–4.8 kHz Transient"
+        case .knockPlusSnap: return "Hybrid Combo · 1× Chassis Knock + 1× Air Snap"
         case .secretRhythm: return "Tempo-Invariant Normalized Cadence Pattern"
         case .trackpadHoldDoubleKnock: return "Multimodal Grammar · Touch Hold + 2× Chassis Knock"
         case .leftZoneDoubleKnock: return "Experimental Spatial Zone · Negative Roll Torque"
@@ -156,10 +173,11 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
     public var symbolName: String {
         switch self {
         case .doubleKnock: return "hand.tap.fill"
-        case .tripleKnock: return "square.stack.3d.down.right.fill"
-        case .doubleSnap: return "waveform.badge.magnifyingglass"
+        case .tripleKnock: return "waveform.path.ecg"
+        case .doubleSnap: return "speaker.wave.2.fill"
+        case .knockPlusSnap: return "sparkles"
         case .secretRhythm: return "metronome.fill"
-        case .trackpadHoldDoubleKnock: return "rectangle.and.hand.point.up.left.fill"
+        case .trackpadHoldDoubleKnock: return "rectangle.roundedtop"
         case .leftZoneDoubleKnock: return "lessthan.circle.fill"
         case .rightZoneDoubleKnock: return "greaterthan.circle.fill"
         case .hingeNudge: return "laptopcomputer"
@@ -177,7 +195,7 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
 
     public var requiresMicrophone: Bool {
         switch self {
-        case .doubleSnap:
+        case .doubleSnap, .knockPlusSnap:
             return true
         default:
             return false
@@ -189,6 +207,7 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
         case .doubleKnock: return "200HZ MOTION + FUSION"
         case .tripleKnock: return "3-PULSE CHASSIS"
         case .doubleSnap: return "AIR TRANSIENT"
+        case .knockPlusSnap: return "HYBRID FUSION"
         case .secretRhythm: return "DTW CADENCE"
         case .trackpadHoldDoubleKnock: return "MULTIMODAL COMBO"
         case .leftZoneDoubleKnock: return "EXP · LEFT TORQUE"
@@ -198,7 +217,7 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
     }
 
     public static var coreGestures: [AcousticGestureType] {
-        [.doubleKnock, .tripleKnock, .doubleSnap, .secretRhythm, .trackpadHoldDoubleKnock]
+        [.doubleKnock, .tripleKnock, .doubleSnap, .knockPlusSnap, .trackpadHoldDoubleKnock, .secretRhythm]
     }
 
     public static var experimentalGestures: [AcousticGestureType] {
@@ -209,80 +228,88 @@ public enum AcousticGestureType: String, CaseIterable, Codable, Identifiable, Se
 // MARK: - Part 7: Typed System & Automation Actions
 
 public enum SystemActionType: String, CaseIterable, Codable, Identifiable, Sendable {
-    case hudPreviewOnly = "hud_preview_only"
     case playPauseMedia = "play_pause_media"
     case muteUnmuteAudio = "mute_unmute_audio"
+    case lockScreen = "lock_screen"
+    case privacyShield = "privacy_shield"
+    case openSpotlight = "open_spotlight"
+    case openChatGPT = "open_chatgpt"
     case nextTrack = "next_track"
     case previousTrack = "previous_track"
     case missionControl = "mission_control"
-    case lockScreen = "lock_screen"
-    case privacyShield = "privacy_shield"
     case launchApplication = "launch_application"
     case openURL = "open_url"
     case runShortcut = "run_shortcut"
     case runAppleScript = "run_applescript"
     case runShellWorkflow = "run_shell_workflow"
     case toggleResonWindow = "toggle_reson_window"
+    case hudPreviewOnly = "hud_preview_only"
     case disabled = "disabled"
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .hudPreviewOnly: return "HUD Confirmation Only (Safe Test Mode)"
         case .playPauseMedia: return "Play / Pause Media"
-        case .muteUnmuteAudio: return "Mute / Unmute System Audio"
-        case .nextTrack: return "Next Media Track"
-        case .previousTrack: return "Previous Media Track"
+        case .muteUnmuteAudio: return "Mute / Unmute"
+        case .lockScreen: return "Lock Screen"
+        case .privacyShield: return "Privacy Shield"
+        case .openSpotlight: return "Open Spotlight"
+        case .openChatGPT: return "Open ChatGPT"
+        case .nextTrack: return "Next Track"
+        case .previousTrack: return "Previous Track"
         case .missionControl: return "Mission Control"
-        case .lockScreen: return "Start Screen Saver / Lock"
-        case .privacyShield: return "Visual Privacy Overlay (Non-DRM)"
         case .launchApplication: return "Launch Application"
-        case .openURL: return "Open Configured URL"
+        case .openURL: return "Open URL"
         case .runShortcut: return "Run macOS Shortcut"
-        case .runAppleScript: return "Run Approved AppleScript"
-        case .runShellWorkflow: return "Run Opt-In Shell Command"
-        case .toggleResonWindow: return "Show / Hide KnockKnock X Studio"
+        case .runAppleScript: return "Run AppleScript"
+        case .runShellWorkflow: return "Run Shell Command"
+        case .toggleResonWindow: return "Open Reson Studio"
+        case .hudPreviewOnly: return "HUD Preview Only"
         case .disabled: return "Disabled"
         }
     }
 
     public var shortTitle: String {
         switch self {
-        case .hudPreviewOnly: return "HUD Only"
         case .playPauseMedia: return "Play / Pause"
-        case .muteUnmuteAudio: return "Mute Audio"
+        case .muteUnmuteAudio: return "Volume Mute"
+        case .lockScreen: return "Lock Screen"
+        case .privacyShield: return "Privacy Shield"
+        case .openSpotlight: return "Open Spotlight"
+        case .openChatGPT: return "Open ChatGPT"
         case .nextTrack: return "Next Track"
         case .previousTrack: return "Prev Track"
         case .missionControl: return "Mission Control"
-        case .lockScreen: return "Lock Screen"
-        case .privacyShield: return "Privacy Overlay"
         case .launchApplication: return "Launch App"
         case .openURL: return "Open URL"
         case .runShortcut: return "Shortcut"
         case .runAppleScript: return "AppleScript"
         case .runShellWorkflow: return "Shell Command"
-        case .toggleResonWindow: return "Toggle UI"
+        case .toggleResonWindow: return "Toggle Reson"
+        case .hudPreviewOnly: return "HUD Only"
         case .disabled: return "Off"
         }
     }
 
     public var symbolName: String {
         switch self {
-        case .hudPreviewOnly: return "checkmark.bubble.fill"
         case .playPauseMedia: return "playpause.fill"
-        case .muteUnmuteAudio: return "speaker.slash.fill"
+        case .muteUnmuteAudio: return "speaker.wave.2.fill"
+        case .lockScreen: return "lock.fill"
+        case .privacyShield: return "eye.slash.fill"
+        case .openSpotlight: return "magnifyingglass"
+        case .openChatGPT: return "sparkles"
         case .nextTrack: return "forward.fill"
         case .previousTrack: return "backward.fill"
         case .missionControl: return "macwindow.on.rectangle"
-        case .lockScreen: return "lock.desktopcomputer"
-        case .privacyShield: return "eye.slash.circle.fill"
         case .launchApplication: return "app.badge.checkmark.fill"
         case .openURL: return "safari.fill"
         case .runShortcut: return "bolt.horizontal.circle.fill"
         case .runAppleScript: return "applescript.fill"
         case .runShellWorkflow: return "terminal.fill"
         case .toggleResonWindow: return "macwindow"
+        case .hudPreviewOnly: return "checkmark.bubble.fill"
         case .disabled: return "nosign"
         }
     }
@@ -488,48 +515,60 @@ public struct AppGestureProfile: Identifiable, Codable, Sendable, Equatable {
 // MARK: - Versioned Configuration Schema (Part 9 & Part 12)
 
 public struct AcousticClassifierConfig: Codable, Sendable, Equatable {
-    public var schemaVersion: Int = 2
+    public var schemaVersion: Int = 3
     public var modalityMode: SensorModalityMode = .sensorFusion
-    public var sensitivity: Float = 0.58          // 0.1 ... 1.0
-    public var minimumConfidence: Double = 0.72   // 0.5 ... 0.98
-    public var minimumCrestFactor: Float = 4.2    // Peak-to-RMS ratio for sharp transient
-    public var minimumMotionJerkG: Double = 0.032 // Minimum BMI286 g-jerk for chassis knock
-    public var minDoubleIntervalMs: Double = 125  // Minimum ms between knocks/snaps
-    public var maxDoubleIntervalMs: Double = 480  // Maximum ms between knocks/snaps
-    public var typingSuppressionWindowMs: Double = 350
-    public var cooldownMs: Double = 1100
+    public var sensitivity: Float = 0.65          // 0.1 ... 1.0
+    public var minimumConfidence: Double = 0.70   // 0.5 ... 0.98
+    public var minimumCrestFactor: Float = 3.8    // Peak-to-RMS ratio for sharp transient
+    public var minimumMotionJerkG: Double = 0.020 // Minimum BMI286 g-jerk for effortless chassis knock
+    public var minDoubleIntervalMs: Double = 110  // Minimum ms between knocks/snaps
+    public var maxDoubleIntervalMs: Double = 550  // Maximum ms between knocks/snaps
+    public var typingSuppressionWindowMs: Double = 180
+    public var cooldownMs: Double = 850
     public var pauseOnBatteryPower: Bool = false
     public var enableExperimentalSpatialZones: Bool = false
     public var enableExperimentalHingeDial: Bool = false
     public var enableShellAutomationOptIn: Bool = false
+    public var selectedPresetProfileID: String = "default"
+    public var enabledGestures: [AcousticGestureType: Bool] = [
+        .doubleKnock: true,
+        .tripleKnock: true,
+        .doubleSnap: true,
+        .knockPlusSnap: true,
+        .trackpadHoldDoubleKnock: true,
+        .secretRhythm: true,
+        .leftZoneDoubleKnock: false,
+        .rightZoneDoubleKnock: false,
+        .hingeNudge: false
+    ]
 
     /// Normalized relative intervals for the custom secret rhythm (default: 4-beat cadence)
     public var targetRhythmRatios: [Double] = [1.0, 0.52, 0.52]
-    public var rhythmTolerance: Double = 0.22
+    public var rhythmTolerance: Double = 0.24
 
     /// Automation parameters
     public var customShortcutName: String = ""
     public var targetApplicationPath: String = "/System/Applications/Music.app"
-    public var targetURLString: String = "https://github.com/carelessdept/KnockKnock"
-    public var customAppleScript: String = "display notification \"Triggered by KnockKnock X\" with title \"KnockKnock X\""
-    public var customShellCommand: String = "echo 'KnockKnock X triggered'"
+    public var targetURLString: String = "https://chatgpt.com"
+    public var customAppleScript: String = "display notification \"Triggered by Reson\" with title \"Reson\""
+    public var customShellCommand: String = "echo 'Reson triggered'"
 
     /// Calibration learned baseline
-    public var calibratedMeanKnockJerkG: Double = 0.085
-    public var calibratedLeftRollBias: Double = -2.4
-    public var calibratedRightRollBias: Double = 2.4
+    public var calibratedMeanKnockJerkG: Double = 0.065
+    public var calibratedLeftRollBias: Double = -2.2
+    public var calibratedRightRollBias: Double = 2.2
     public var calibrationSampleCount: Int = 0
 
     public init() {}
 
     public var amplitudeGate: Float {
         let clamped = max(0.1, min(1.0, sensitivity))
-        return max(0.055, 0.23 - (clamped * 0.17))
+        return max(0.038, 0.19 - (clamped * 0.14))
     }
 
     public var effectiveMotionJerkGateG: Double {
         let clamped = Double(max(0.1, min(1.0, sensitivity)))
-        return max(0.016, minimumMotionJerkG * (1.45 - clamped * 0.75))
+        return max(0.014, minimumMotionJerkG * (1.40 - clamped * 0.70))
     }
 
     /// Validates configuration bounds and sanitizes any out-of-range values on import.

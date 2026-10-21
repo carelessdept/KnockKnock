@@ -39,19 +39,12 @@ public final class ContextObserver {
         }
     }
 
-    /// Privacy-safe query of milliseconds elapsed since any keyboard, mouse, trackpad, or scroll event.
-    /// Does NOT inspect or record key codes or typed text.
+    /// Privacy-safe query of milliseconds elapsed since the last physical keyboard key press.
+    /// Does NOT include mouseMoved/scrollWheel so palm contact or slight cursor vibration never blocks knocks.
     nonisolated public static func millisecondsSinceLastUserInput() -> Double {
         let events: [CGEventType] = [
             .keyDown,
-            .keyUp,
-            .flagsChanged,
-            .leftMouseDown,
-            .leftMouseUp,
-            .rightMouseDown,
-            .mouseMoved,
-            .leftMouseDragged,
-            .scrollWheel
+            .keyUp
         ]
         var minSec = Double.greatestFiniteMagnitude
         for ev in events {
@@ -63,13 +56,13 @@ public final class ContextObserver {
         return minSec * 1000.0
     }
 
-    /// Checks whether the user is currently holding the trackpad/mouse button or Option+Control chord
+    /// Checks whether the user is currently holding the trackpad/mouse button or Fn/Option/Control modifier
     /// for Multimodal Physical Gesture Combinations (Part 6.5).
     nonisolated public static func isTrackpadOrModifierHeld() -> Bool {
         let leftDown = CGEventSource.buttonState(.combinedSessionState, button: .left)
         let flags = CGEventSource.flagsState(.combinedSessionState)
-        let fnOrOptionHeld = flags.contains(.maskAlternate) && flags.contains(.maskControl)
-        return leftDown || fnOrOptionHeld
+        let modifierHeld = flags.contains(.maskAlternate) || flags.contains(.maskControl) || flags.contains(.maskSecondaryFn)
+        return leftDown || modifierHeld
     }
 
     private func registerLifecycleObservers() {

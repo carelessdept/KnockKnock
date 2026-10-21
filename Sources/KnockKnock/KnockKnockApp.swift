@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 
 @main
-struct KnockKnockApp: App {
-    @NSApplicationDelegateAdaptor(KnockKnockAppDelegate.self) private var appDelegate
+struct ResonApp: App {
+    @NSApplicationDelegateAdaptor(ResonAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("KnockKnock Settings", id: "settings") {
+        Window("Reson", id: "settings") {
             SettingsWindowView(
                 engine: appDelegate.engine,
                 onTriggerAction: { gesture in
@@ -31,7 +31,11 @@ struct KnockKnockApp: App {
                 },
                 onStartCalibration: {
                     appDelegate.openSettingsWindow()
-                    appDelegate.engine.startGuidedKnockCalibration()
+                    NotificationCenter.default.post(name: Notification.Name("ResonOpenSection"), object: "calibrate")
+                },
+                onOpenStudio: {
+                    appDelegate.openSettingsWindow()
+                    NotificationCenter.default.post(name: Notification.Name("ResonOpenSection"), object: "Studio")
                 },
                 onTriggerAction: { gesture in
                     appDelegate.handleGestureTrigger(gesture)
@@ -41,15 +45,11 @@ struct KnockKnockApp: App {
                 }
             )
         } label: {
-            HStack(spacing: 4) {
-                Image(
-                    systemName: appDelegate.engine.isListening
-                        ? "waveform.circle.fill"
-                        : "waveform.slash"
-                )
-                .symbolRenderingMode(.hierarchical)
-                Text("Knock")
-                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+            HStack(spacing: 3) {
+                Text("R")
+                    .font(.system(size: 11.5, weight: .heavy, design: .rounded))
+                Image(systemName: appDelegate.engine.isListening ? "wave.3.right" : "wave.3.right.circle")
+                    .font(.system(size: 10, weight: .bold))
             }
         }
         .menuBarExtraStyle(.window)
@@ -57,12 +57,16 @@ struct KnockKnockApp: App {
 }
 
 @MainActor
-final class KnockKnockAppDelegate: NSObject, NSApplicationDelegate {
+final class ResonAppDelegate: NSObject, NSApplicationDelegate {
     let engine = AcousticImpulseEngine()
     let hudController = LiquidGlassHUDController.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+
+        if let iconImg = MacOS27Theme.resonMarkNSImage {
+            NSApp.applicationIconImage = iconImg
+        }
 
         SystemActionExecutor.shared.onTogglePrivacyShield = { [weak self] in
             guard let self else { return }
@@ -81,7 +85,7 @@ final class KnockKnockAppDelegate: NSObject, NSApplicationDelegate {
             self.hudController.showGestureHUD(for: record)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) { [weak self] in
             guard let self else { return }
             self.openSettingsWindow()
         }
@@ -93,7 +97,7 @@ final class KnockKnockAppDelegate: NSObject, NSApplicationDelegate {
 
     func openSettingsWindow() {
         NSApp.activate(ignoringOtherApps: true)
-        for window in NSApp.windows where window.title.contains("KnockKnock") || window.identifier?.rawValue.contains("settings") == true {
+        for window in NSApp.windows where window.title.contains("Reson") || window.identifier?.rawValue.contains("settings") == true {
             window.makeKeyAndOrderFront(nil)
             return
         }

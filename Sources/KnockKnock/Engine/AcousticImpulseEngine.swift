@@ -24,6 +24,9 @@ public final class AcousticImpulseEngine {
 
     // Live Telemetry (Updated only when UI visualizer is visible or an onset occurs)
     public var spectrumBands: [Float] = Array(repeating: 0.08, count: 16)
+    public var audioWaveformHistory: [Float] = Array(repeating: 0.04, count: 64)
+    public var motionWaveformHistory: [Float] = Array(repeating: 0.03, count: 64)
+    public var eventTimelineHistory: [Float] = Array(repeating: 0.0, count: 64)
     public var currentPeak: Float = 0.0
     public var currentRMS: Float = 0.0
     public var currentCrestFactor: Float = 1.0
@@ -39,6 +42,7 @@ public final class AcousticImpulseEngine {
     public var isTrackpadHeld: Bool = false
     public var lastDetectedGesture: AcousticGestureType?
     public var lastTriggerTimestamp: Date?
+    public var lastConfidencePercent: Int = 94
 
     // Configuration & Per-App Profiles
     public var config: AcousticClassifierConfig
@@ -81,6 +85,8 @@ public final class AcousticImpulseEngine {
     private var visibleTelemetryConsumers: Int = 0
     private var wasListeningBeforeSleep: Bool = false
 
+    private var pauseResumeTask: Task<Void, Never>?
+
     public init() {
         let loaded = ConfigurationStore.load()
         self.config = loaded.bundle.config
@@ -89,6 +95,50 @@ public final class AcousticImpulseEngine {
         self.configWarnings = loaded.warnings
 
         wireSubsystemCallbacks()
+
+        // Automatically arm listening immediately on launch so Reson works out-of-the-box!
+        DispatchQueue.main.async { [weak self] in
+            self?.startListening()
+        }
+    }
+
+    public func pauseForOneHour() {
+        pauseResumeTask?.cancel()
+        stopListening()
+        statusMessage = "Paused for 1 Hour"
+        pauseResumeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3600))
+            guard !Task.isCancelled, let self else { return }
+            self.startListening()
+        }
+    }
+
+    public func applyPresetProfile(_ profileID: String) {
+        config.selectedPresetProfileID = profileID
+        switch profileID {
+        case "focus":
+            activeProfileName = "Focus"
+            gestureActions[.doubleKnock] = .muteUnmuteAudio
+            gestureActions[.tripleKnock] = .lockScreen
+            gestureActions[.doubleSnap] = .privacyShield
+            gestureActions[.knockPlusSnap] = .openSpotlight
+        case "creative":
+            activeProfileName = "Creative"
+            gestureActions[.doubleKnock] = .playPauseMedia
+            gestureActions[.tripleKnock] = .nextTrack
+            gestureActions[.doubleSnap] = .previousTrack
+            gestureActions[.knockPlusSnap] = .missionControl
+        case "presentation":
+            activeProfileName = "Presentation"
+            gestureActions[.doubleKnock] = .nextTrack
+            gestureActions[.tripleKnock] = .privacyShield
+            gestureActions[.doubleSnap] = .muteUnmuteAudio
+            gestureActions[.knockPlusSnap] = .lockScreen
+        default:
+            activeProfileName = "Default"
+            gestureActions = PersistedConfigurationBundle.defaultGlobalMappings
+        }
+        saveConfiguration()
     }
 
     // MARK: - Telemetry Visibility Management (Zero Idle 60fps CPU Waste — Part 3.3 & 4.4)
@@ -443,6 +493,8 @@ public final class AcousticImpulseEngine {
         if visibleTelemetryConsumers > 0 {
             lowBandLevel = Float(min(1.0, sample.jerkMagnitude * 8.0))
             spectrumBands = [0.88, 0.92, 0.80, 0.65, 0.48, 0.34, 0.22, 0.16, 0.12, 0.10, 0.09, 0.08, 0.08, 0.08, 0.07, 0.07]
+            appendWaveformPoint(&motionWaveformHistory, value: Float(min(1.0, sample.jerkMagnitude * 7.5)))
+            appendWaveformPoint(&eventTimelineHistory, value: 0.95)
         }
 
         if isCalibratingKnocks {
@@ -511,48 +563,48 @@ public final class AcousticImpulseEngine {
             currentCentroidHz = centroidHz
             currentSpectralFlux = flux
             currentLidAngleDegrees = motionService.lidAngleDegrees
+            appendWaveformPoint(&audioWaveformHistory, value: min(1.0, max(0.03, peak * 2.4)))
+            appendWaveformPoint(&motionWaveformHistory, value: Float(min(1.0, max(0.02, motionService.latestJerkG * 6.5))))
+            appendWaveformPoint(&eventTimelineHistory, value: 0.0)
         }
 
         let msSinceKey = ContextObserver.millisecondsSinceLastUserInput()
         isTypingSuppressed = msSinceKey < config.typingSuppressionWindowMs
         isTrackpadHeld = ContextObserver.isTrackpadOrModifierHeld()
 
-        let dynamicGate = max(config.amplitudeGate, rollingAmbientPeak * 4.2)
+        let dynamicGate = max(config.amplitudeGate, rollingAmbientPeak * 3.6)
         if peak < dynamicGate {
-            rollingAmbientPeak = min(0.08, max(0.005, rollingAmbientPeak * 0.96 + peak * 0.04))
+            rollingAmbientPeak = min(0.06, max(0.004, rollingAmbientPeak * 0.96 + peak * 0.04))
             consecutiveLoudFrames = 0
             return
         }
 
         consecutiveLoudFrames += 1
-        // Reject sustained speech/music/noise lasting > 1 consecutive buffer (unless corroborated by BMI286 motion)
-        if consecutiveLoudFrames > 1 {
+        // Reject continuous speech/music lasting > 3 consecutive buffers (>65 ms),
+        // without EVER wiping out hardware BMI286 knock timestamps!
+        if consecutiveLoudFrames > 3 {
             rejectionCounts[.sustainedAudioRejected, default: 0] += 1
             performanceMonitor.recordSuppression()
-            PendingCancel()
-            knockPulseTimestamps.removeAll()
             snapPulseTimestamps.removeAll()
-            allPulseTimestamps.removeAll()
             return
         }
+
+        // Only evaluate the onset frame (frame 1) of an acoustic transient
+        guard consecutiveLoudFrames == 1 else { return }
 
         let now = ProcessInfo.processInfo.systemUptime
-        guard (now - lastImpulseTime) * 1000.0 >= 140.0 else { return }
+        guard (now - lastImpulseTime) * 1000.0 >= 115.0 else { return }
 
-        // Check if BMI286 motion sensor already fired within the last 45 ms (avoid double-counting the same knock)
+        // Check if BMI286 motion sensor already fired within the last 65 ms (avoid double-counting the same knock)
         let recentMotionJerk: Double
         let recentGyroRoll: Double
-        if let m = lastMotionImpact, (now - m.timestamp) <= 0.045 {
-            // Already handled by the 200 Hz BMI286 impact handler!
+        if let m = lastMotionImpact, (now - m.timestamp) <= 0.065 {
             return
         } else {
-            recentMotionJerk = 0.0
-            recentGyroRoll = 0.0
+            recentMotionJerk = motionService.latestJerkG
+            recentGyroRoll = motionService.latestGyroRollDegPerSec
         }
 
-        // If BMI286 hardware accelerometer is running and we are in Sensor Fusion mode,
-        // only allow audio-only events that are sharp high-frequency Finger Snaps!
-        // All physical chassis knocks are handled by the 200 Hz BMI286 accelerometer so room noise can NEVER fake a knock.
         guard let classified = AcousticSignalMath.classifyImpulse(
             peak: peak,
             rms: rms,
@@ -563,7 +615,7 @@ public final class AcousticImpulseEngine {
             config: config,
             corroboratingMotionJerkG: recentMotionJerk,
             gyroRollDegPerSec: recentGyroRoll,
-            isSustainedEnvelope: consecutiveLoudFrames > 1
+            isSustainedEnvelope: false
         ) else {
             return
         }
@@ -574,14 +626,15 @@ public final class AcousticImpulseEngine {
             return
         }
 
-        // When BMI286 accelerometer is active on this Mac, require chassis knocks to come from BMI286 motion!
-        if motionService.isRunning && config.modalityMode == .sensorFusion && classified.kind != .fingerSnap {
-            rejectionCounts[.insufficientMotionJerk, default: 0] += 1
-            performanceMonitor.recordSuppression()
-            return
+        lastImpulseTime = now
+        if visibleTelemetryConsumers > 0 {
+            appendWaveformPoint(&eventTimelineHistory, value: 0.92)
         }
 
-        lastImpulseTime = now
+        if isCalibratingKnocks && classified.kind != .fingerSnap {
+            recordCalibrationSample(jerkG: max(recentMotionJerk, Double(peak) * 0.18), rollDegPerSec: recentGyroRoll)
+            return
+        }
 
         let sample = AcousticImpulseSample(
             kind: classified.kind,
@@ -608,6 +661,13 @@ public final class AcousticImpulseEngine {
             zone: classified.zone,
             at: now
         )
+    }
+
+    private func appendWaveformPoint(_ buffer: inout [Float], value: Float) {
+        buffer.append(value)
+        if buffer.count > 64 {
+            buffer.removeFirst(buffer.count - 64)
+        }
     }
 
     // MARK: - Temporal Cadence & Gesture Arbitration State Machine
@@ -642,7 +702,7 @@ public final class AcousticImpulseEngine {
             targetRatios: config.targetRhythmRatios,
             tolerance: config.rhythmTolerance
         )
-        if rhythmCheck.matched && rhythmCheck.score >= config.minimumConfidence {
+        if rhythmCheck.matched && rhythmCheck.score >= config.minimumConfidence && isGestureEnabled(.secretRhythm) {
             allPulseTimestamps.removeAll()
             knockPulseTimestamps.removeAll()
             snapPulseTimestamps.removeAll()
@@ -659,12 +719,53 @@ public final class AcousticImpulseEngine {
             return
         }
 
+        // 2. Check Hybrid "Knock + Snap" Combo (1x Knock + 1x Snap within 120..680 ms)
+        if isGestureEnabled(.knockPlusSnap) {
+            if kind == .fingerSnap, let lastKnock = knockPulseTimestamps.last {
+                let dt = (now - lastKnock) * 1000.0
+                if dt >= 110.0 && dt <= 680.0 {
+                    PendingCancel()
+                    knockPulseTimestamps.removeAll()
+                    snapPulseTimestamps.removeAll()
+                    allPulseTimestamps.removeAll()
+                    fireGesture(
+                        .knockPlusSnap,
+                        confidence: 0.95,
+                        interPulseMs: Int(dt),
+                        crestFactor: crestFactor,
+                        motionJerkG: motionJerkG,
+                        zone: zone,
+                        simulated: false
+                    )
+                    return
+                }
+            } else if (kind == .fusedChassisKnock || kind == .motionChassisKnock), let lastSnap = snapPulseTimestamps.last {
+                let dt = (now - lastSnap) * 1000.0
+                if dt >= 110.0 && dt <= 680.0 {
+                    PendingCancel()
+                    knockPulseTimestamps.removeAll()
+                    snapPulseTimestamps.removeAll()
+                    allPulseTimestamps.removeAll()
+                    fireGesture(
+                        .knockPlusSnap,
+                        confidence: 0.95,
+                        interPulseMs: Int(dt),
+                        crestFactor: crestFactor,
+                        motionJerkG: motionJerkG,
+                        zone: zone,
+                        simulated: false
+                    )
+                    return
+                }
+            }
+        }
+
         switch kind {
         case .fusedChassisKnock, .motionChassisKnock:
             knockPulseTimestamps.append(now)
             knockPulseTimestamps = knockPulseTimestamps.filter { (now - $0) * 1000.0 <= config.maxDoubleIntervalMs * 2.2 }
 
-            if knockPulseTimestamps.count >= 3 {
+            if knockPulseTimestamps.count >= 3 && isGestureEnabled(.tripleKnock) {
                 let t3 = knockPulseTimestamps[knockPulseTimestamps.count - 1]
                 let t2 = knockPulseTimestamps[knockPulseTimestamps.count - 2]
                 let t1 = knockPulseTimestamps[knockPulseTimestamps.count - 3]
@@ -698,8 +799,10 @@ public final class AcousticImpulseEngine {
                 if dt >= config.minDoubleIntervalMs && dt <= config.maxDoubleIntervalMs {
                     let held = isTrackpadHeld
                     PendingCancel()
+                    // If Triple Knock is disabled, fire Double Knock after a minimal 80ms window; otherwise 250ms arbitration
+                    let waitMs = isGestureEnabled(.tripleKnock) ? 250 : 80
                     pendingDoubleKnockTask = Task { @MainActor [weak self] in
-                        try? await Task.sleep(for: .milliseconds(270))
+                        try? await Task.sleep(for: .milliseconds(waitMs))
                         guard !Task.isCancelled, let self else { return }
                         self.knockPulseTimestamps.removeAll()
                         self.allPulseTimestamps.removeAll()
@@ -720,9 +823,9 @@ public final class AcousticImpulseEngine {
 
         case .fingerSnap:
             snapPulseTimestamps.append(now)
-            snapPulseTimestamps = snapPulseTimestamps.filter { (now - $0) * 1000.0 <= config.maxDoubleIntervalMs * 1.5 }
+            snapPulseTimestamps = snapPulseTimestamps.filter { (now - $0) * 1000.0 <= config.maxDoubleIntervalMs * 1.6 }
 
-            if snapPulseTimestamps.count >= 2 {
+            if snapPulseTimestamps.count >= 2 && isGestureEnabled(.doubleSnap) {
                 let t2 = snapPulseTimestamps[snapPulseTimestamps.count - 1]
                 let t1 = snapPulseTimestamps[snapPulseTimestamps.count - 2]
                 let dt = (t2 - t1) * 1000.0
@@ -748,15 +851,28 @@ public final class AcousticImpulseEngine {
         }
     }
 
+    public func isGestureEnabled(_ gesture: AcousticGestureType) -> Bool {
+        guard config.enabledGestures[gesture] ?? true else { return false }
+        return (gestureActions[gesture] ?? .disabled) != .disabled
+    }
+
+    public func setGestureEnabled(_ gesture: AcousticGestureType, enabled: Bool) {
+        config.enabledGestures[gesture] = enabled
+        if enabled && (gestureActions[gesture] == nil || gestureActions[gesture] == .disabled) {
+            gestureActions[gesture] = PersistedConfigurationBundle.defaultGlobalMappings[gesture] ?? .playPauseMedia
+        }
+        saveConfiguration()
+    }
+
     private func resolveDoubleKnockVariant(isHeld: Bool, zone: SpatialKnockZone) -> AcousticGestureType {
-        if isHeld && effectiveAction(for: .trackpadHoldDoubleKnock) != .disabled {
+        if isHeld && isGestureEnabled(.trackpadHoldDoubleKnock) {
             return .trackpadHoldDoubleKnock
         }
         if config.enableExperimentalSpatialZones {
-            if zone == .leftPalmRest && effectiveAction(for: .leftZoneDoubleKnock) != .disabled {
+            if zone == .leftPalmRest && isGestureEnabled(.leftZoneDoubleKnock) {
                 return .leftZoneDoubleKnock
             }
-            if zone == .rightPalmRest && effectiveAction(for: .rightZoneDoubleKnock) != .disabled {
+            if zone == .rightPalmRest && isGestureEnabled(.rightZoneDoubleKnock) {
                 return .rightZoneDoubleKnock
             }
         }
@@ -764,6 +880,7 @@ public final class AcousticImpulseEngine {
     }
 
     public func effectiveAction(for gesture: AcousticGestureType) -> SystemActionType {
+        guard config.enabledGestures[gesture] ?? true else { return .disabled }
         let bundleID = contextObserver.frontmostBundleID
         if let profile = appProfiles.first(where: { $0.bundleIdentifier == bundleID && $0.isEnabled }),
            let mapped = profile.mappings[gesture],
@@ -785,13 +902,13 @@ public final class AcousticImpulseEngine {
         }
     }
 
-    // MARK: - Guided Calibration Wizard (Part 4.3)
+    // MARK: - Guided Calibration Wizard (3 Taps — Matches Reference Design)
 
     public func startGuidedKnockCalibration() {
         isCalibratingKnocks = true
         calibrationRecordedJerks.removeAll()
         calibrationRecordedRolls.removeAll()
-        calibrationStatusText = "Calibration Active: Knock firmly 4 times on your MacBook palm rest (0 / 4)…"
+        calibrationStatusText = "Tap your MacBook 3 times · We'll learn your unique signature (0 / 3)"
         if !isListening {
             startListening()
         }
@@ -804,19 +921,19 @@ public final class AcousticImpulseEngine {
         calibrationStatusText = "Calibration cancelled."
     }
 
-    private func recordCalibrationSample(jerkG: Double, rollDegPerSec: Double) {
+    public func recordCalibrationSample(jerkG: Double, rollDegPerSec: Double) {
         calibrationRecordedJerks.append(jerkG)
         calibrationRecordedRolls.append(rollDegPerSec)
-        let count = calibrationRecordedJerks.count
-        calibrationStatusText = "Recorded Knock \(count) of 4 (Peak \(String(format: "%.3f g", jerkG)))…"
-        if count >= 4 {
-            let meanJerk = calibrationRecordedJerks.reduce(0, +) / Double(count)
+        let count = min(3, calibrationRecordedJerks.count)
+        calibrationStatusText = "Recorded Tap \(count) of 3 (Peak \(String(format: "%.3f g", jerkG)))"
+        if calibrationRecordedJerks.count >= 3 {
+            let meanJerk = calibrationRecordedJerks.reduce(0, +) / Double(calibrationRecordedJerks.count)
             config.calibratedMeanKnockJerkG = meanJerk
-            config.minimumMotionJerkG = max(0.018, min(0.085, meanJerk * 0.52))
-            config.calibrationSampleCount += count
+            config.minimumMotionJerkG = max(0.014, min(0.055, meanJerk * 0.48))
+            config.calibrationSampleCount += calibrationRecordedJerks.count
             isCalibratingKnocks = false
             calibrationStatusText = String(
-                format: "Calibrated from 4 hardware knocks · Mean %.3fg → Gate %.3fg",
+                format: "Signature learned from 3 taps · Mean %.3fg → Gate %.3fg",
                 meanJerk,
                 config.minimumMotionJerkG
             )
@@ -835,12 +952,12 @@ public final class AcousticImpulseEngine {
             currentCrestFactor = 8.4
             currentMotionJerkG = 0.095
             spectrumBands = [0.92, 0.96, 0.88, 0.76, 0.62, 0.42, 0.28, 0.20, 0.16, 0.14, 0.12, 0.11, 0.10, 0.09, 0.08, 0.08]
-        case .doubleSnap:
-            lowBandLevel = 0.16
+        case .doubleSnap, .knockPlusSnap:
+            lowBandLevel = 0.34
             highBandLevel = 0.89
             currentPeak = 0.82
             currentCrestFactor = 10.2
-            currentMotionJerkG = 0.002
+            currentMotionJerkG = 0.042
             spectrumBands = [0.12, 0.14, 0.16, 0.22, 0.30, 0.42, 0.56, 0.68, 0.82, 0.94, 0.98, 0.91, 0.84, 0.72, 0.58, 0.44]
         case .secretRhythm, .hingeNudge:
             lowBandLevel = 0.68
@@ -947,6 +1064,7 @@ public final class AcousticImpulseEngine {
         lastTriggerTime = ProcessInfo.processInfo.systemUptime
         lastDetectedGesture = gesture
         lastTriggerTimestamp = Date()
+        lastConfidencePercent = Int((confidence * 100.0).rounded())
 
         let execResult = SystemActionExecutor.shared.execute(action, config: config)
         let latencyMs = max(1.2, Double(DispatchTime.now().uptimeNanoseconds - tStart) / 1_000_000.0 + 14.5)

@@ -67,6 +67,26 @@ public final class SystemActionExecutor {
             }
             return ("ScreenSaverEngine not available", false)
 
+        case .openSpotlight:
+            let spotlightURL = URL(fileURLWithPath: "/System/Library/CoreServices/Spotlight.app")
+            if FileManager.default.fileExists(atPath: spotlightURL.path) {
+                NSWorkspace.shared.openApplication(at: spotlightURL, configuration: NSWorkspace.OpenConfiguration())
+                return ("Opened Spotlight", true)
+            }
+            return ("Spotlight not found", false)
+
+        case .openChatGPT:
+            let chatAppURL = URL(fileURLWithPath: "/Applications/ChatGPT.app")
+            if FileManager.default.fileExists(atPath: chatAppURL.path) {
+                NSWorkspace.shared.openApplication(at: chatAppURL, configuration: NSWorkspace.OpenConfiguration())
+                return ("Opened ChatGPT App", true)
+            }
+            if let url = URL(string: "https://chatgpt.com") {
+                NSWorkspace.shared.open(url)
+                return ("Opened ChatGPT", true)
+            }
+            return ("Could not open ChatGPT", false)
+
         case .launchApplication:
             let path = config.targetApplicationPath.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {

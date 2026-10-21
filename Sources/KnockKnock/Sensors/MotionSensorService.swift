@@ -218,6 +218,11 @@ private final class NonisolatedSPUProcessor: @unchecked Sendable {
     private var lastUIUpdateTime: TimeInterval = 0
     private var lastImpactTime: TimeInterval = 0
 
+    // 3-sample (15 ms) peak-hold window so rising edge doesn't swallow the true knock peak
+    private var isCapturingPeak: Bool = false
+    private var peakWindowSamplesRemaining: Int = 0
+    private var peakCandidate: MotionSample? = nil
+
     func bind(service: MotionSensorService) {
         self.service = service
     }
@@ -292,12 +297,40 @@ private final class NonisolatedSPUProcessor: @unchecked Sendable {
         let aHz = measuredAccelHz
         let gHz = measuredGyroHz
 
-        // Lightweight gate before hopping to @MainActor:
-        // 1. If jerk >= 0.015g and refractory > 75ms, dispatch real mechanical impact immediately.
-        if jerk >= 0.015 && (now - lastImpactTime) >= 0.075 {
-            lastImpactTime = now
+        // Peak-hold capture across 3 samples (15 ms at 200 Hz) so we always report the true peak of a knock!
+        if isCapturingPeak {
+            if let existing = peakCandidate, jerk > existing.jerkMagnitude {
+                let zone = AcousticSignalMath.estimateSpatialZone(gyroRollDegPerSec: currentGyroY)
+                peakCandidate = MotionSample(
+                    timestamp: now,
+                    accelX: vx,
+                    accelY: vy,
+                    accelZ: vz,
+                    gyroX: currentGyroX,
+                    gyroY: abs(currentGyroY) > abs(existing.gyroY) ? currentGyroY : existing.gyroY,
+                    gyroZ: currentGyroZ,
+                    jerkMagnitude: jerk,
+                    estimatedZone: zone
+                )
+            }
+            peakWindowSamplesRemaining -= 1
+            if peakWindowSamplesRemaining <= 0, let finalizedPeak = peakCandidate {
+                isCapturingPeak = false
+                peakCandidate = nil
+                lastImpactTime = now
+                Task { @MainActor [weak service] in
+                    service?.handleDecodedImpact(finalizedPeak, accelHz: aHz, gyroHz: gHz)
+                }
+            }
+            return
+        }
+
+        // Start 15ms peak capture when jerk crosses 0.014g and refractory > 85ms
+        if jerk >= 0.014 && (now - lastImpactTime) >= 0.085 {
+            isCapturingPeak = true
+            peakWindowSamplesRemaining = 3
             let zone = AcousticSignalMath.estimateSpatialZone(gyroRollDegPerSec: currentGyroY)
-            let sample = MotionSample(
+            peakCandidate = MotionSample(
                 timestamp: now,
                 accelX: vx,
                 accelY: vy,
@@ -308,9 +341,6 @@ private final class NonisolatedSPUProcessor: @unchecked Sendable {
                 jerkMagnitude: jerk,
                 estimatedZone: zone
             )
-            Task { @MainActor [weak service] in
-                service?.handleDecodedImpact(sample, accelHz: aHz, gyroHz: gHz)
-            }
             return
         }
 
