@@ -118,9 +118,25 @@ public final class AcousticImpulseEngine {
         }
 
         let sampleRate = Float(format.sampleRate)
-        let currentConfig = self.config
+        let tapBlock = Self.makeAudioTapBlock(engine: self, sampleRate: sampleRate)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format, block: tapBlock)
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        do {
+            try engine.start()
+            self.audioEngine = engine
+            self.isListening = true
+            self.statusMessage = "Listening · 80–450 Hz Knock & 2.2–4.8 kHz Snap"
+        } catch {
+            self.isListening = true
+            self.statusMessage = "Interactive Simulation Mode (\(error.localizedDescription))"
+        }
+    }
+
+    nonisolated private static func makeAudioTapBlock(
+        engine: AcousticImpulseEngine,
+        sampleRate: Float
+    ) -> AVAudioNodeTapBlock {
+        return { [weak engine] buffer, _ in
             guard let channelData = buffer.floatChannelData?[0] else { return }
             let frameCount = Int(buffer.frameLength)
             guard frameCount >= 256 else { return }
@@ -131,35 +147,23 @@ public final class AcousticImpulseEngine {
             var rms: Float = 0
             vDSP_rmsqv(channelData, 1, &rms, vDSP_Length(frameCount))
 
-            // Compute 16 log-spaced spectral bars + 3 physical frequency bands
             let bands = Self.computeSpectralProfile(
                 samples: channelData,
                 count: frameCount,
                 sampleRate: sampleRate
             )
 
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.ingestAudioFrame(
+            Task { @MainActor [weak engine] in
+                guard let engine else { return }
+                engine.ingestAudioFrame(
                     peak: peak,
                     rms: rms,
                     lowEnergy: bands.low,
                     midEnergy: bands.mid,
                     highEnergy: bands.high,
-                    bars: bands.bars,
-                    config: currentConfig
+                    bars: bands.bars
                 )
             }
-        }
-
-        do {
-            try engine.start()
-            self.audioEngine = engine
-            self.isListening = true
-            self.statusMessage = "Listening · 80–450 Hz Knock & 2.2–4.8 kHz Snap"
-        } catch {
-            self.isListening = true
-            self.statusMessage = "Interactive Simulation Mode (\(error.localizedDescription))"
         }
     }
 
@@ -226,8 +230,7 @@ public final class AcousticImpulseEngine {
         lowEnergy: Float,
         midEnergy: Float,
         highEnergy: Float,
-        bars: [Float],
-        config: AcousticClassifierConfig
+        bars: [Float]
     ) {
         // Smoothly blend live spectrum bars
         for i in 0..<min(spectrumBands.count, bars.count) {
