@@ -11,6 +11,7 @@ public enum ResonSidebarSection: String, CaseIterable, Identifiable {
     case profiles = "Profiles"
     case studio = "Studio"
     case signalLab = "Signal Lab"
+    case guide = "Guide"
     case settings = "Settings"
 
     public var id: String { rawValue }
@@ -23,6 +24,7 @@ public enum ResonSidebarSection: String, CaseIterable, Identifiable {
         case .profiles: return "person.crop.square.filled.and.at.rectangle"
         case .studio: return "slider.horizontal.3"
         case .signalLab: return "waveform.path.ecg"
+        case .guide: return "book.pages"
         case .settings: return "gearshape"
         }
     }
@@ -70,6 +72,7 @@ public struct SettingsWindowView: View {
     @State private var isShowingCalibrationSheet: Bool = false
     @State private var selectedCalibrationModality: CalibrationModalityTab = .knock
     @State private var gestureSearchText: String = ""
+    @State private var expandedGesture: AcousticGestureType? = .doubleKnock
     @State private var selectedSignalTab: SignalLabSubTab = .live
     @State private var showExportFeedback: String? = nil
 
@@ -122,10 +125,14 @@ public struct SettingsWindowView: View {
                             studioTuningView
                         case .signalLab:
                             signalLabView
+                        case .guide:
+                            guideReferenceView
                         case .settings:
                             settingsAndCapabilitiesView
                         }
                     }
+                    .id(selectedSection)
+                    .transition(.opacity.combined(with: .scale(scale: 0.99)))
                     .padding(26)
                 }
             }
@@ -400,27 +407,73 @@ public struct SettingsWindowView: View {
 
     // MARK: - 3. Calibrate Knock View (Matches Bottom-Center Reference Image)
 
+    private func stepCalibrationModality(delta: Int) {
+        let allTabs = CalibrationModalityTab.allCases
+        guard let currentIndex = allTabs.firstIndex(of: selectedCalibrationModality) else { return }
+        let nextIndex = currentIndex + delta
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            if nextIndex < 0 {
+                engine.cancelGuidedCalibration()
+                isShowingCalibrationSheet = false
+            } else if nextIndex < allTabs.count {
+                let targetTab = allTabs[nextIndex]
+                selectedCalibrationModality = targetTab
+                activateCalibrationModality(targetTab)
+            } else {
+                selectedCalibrationModality = allTabs[0]
+                activateCalibrationModality(allTabs[0])
+            }
+        }
+    }
+
+    private func activateCalibrationModality(_ tab: CalibrationModalityTab) {
+        if tab == .knock || tab == .trackpad || tab == .spatialZones {
+            engine.startGuidedKnockCalibration()
+        }
+        if tab == .hinge {
+            engine.config.enableExperimentalHingeDial = true
+            engine.saveConfiguration()
+        } else if tab == .spatialZones {
+            engine.config.enableExperimentalSpatialZones = true
+            engine.saveConfiguration()
+        }
+    }
+
     private var calibrateKnockView: some View {
         VStack(spacing: 0) {
             // Top Navigation Bar: "←  →   Calibrate Knock"
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button {
-                    withAnimation(.spring(response: 0.26, dampingFraction: 0.84)) {
-                        engine.cancelGuidedCalibration()
-                        isShowingCalibrationSheet = false
-                    }
+                    stepCalibrationModality(delta: -1)
                 } label: {
                     Image(systemName: "arrow.left")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(MacOS27Theme.primaryInk)
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Color.white.opacity(0.75)))
+                        .frame(width: 30, height: 30)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.84))
+                                .overlay(Circle().strokeBorder(MacOS27Theme.subtleStroke, lineWidth: 0.8))
+                        )
                 }
                 .buttonStyle(.plain)
+                .help("Previous calibration modality (or return Home)")
 
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(MacOS27Theme.mutedInk)
+                Button {
+                    stepCalibrationModality(delta: 1)
+                } label: {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(MacOS27Theme.primaryBlue)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.84))
+                                .overlay(Circle().strokeBorder(MacOS27Theme.subtleStroke, lineWidth: 0.8))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Next calibration modality")
 
                 Text("Calibrate \(selectedCalibrationModality.rawValue)")
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
@@ -450,15 +503,9 @@ public struct SettingsWindowView: View {
                     ForEach(CalibrationModalityTab.allCases) { tab in
                         let isSelected = (selectedCalibrationModality == tab)
                         Button {
-                            selectedCalibrationModality = tab
-                            if tab == .knock {
-                                engine.startGuidedKnockCalibration()
-                            } else if tab == .hinge {
-                                engine.config.enableExperimentalHingeDial = true
-                                engine.saveConfiguration()
-                            } else if tab == .spatialZones {
-                                engine.config.enableExperimentalSpatialZones = true
-                                engine.saveConfiguration()
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                                selectedCalibrationModality = tab
+                                activateCalibrationModality(tab)
                             }
                         } label: {
                             HStack(spacing: 10) {
@@ -499,7 +546,7 @@ public struct SettingsWindowView: View {
                     .overlay(MacOS27Theme.subtleStroke)
 
                 // Center Calibration Interactive Canvas
-                VStack(spacing: 24) {
+                VStack(spacing: 20) {
                     Spacer()
 
                     VStack(spacing: 8) {
@@ -507,10 +554,14 @@ public struct SettingsWindowView: View {
                             .font(.system(size: 24, weight: .bold, design: .rounded))
                             .foregroundStyle(MacOS27Theme.primaryInk)
 
-                        Text("We'll learn your unique signature.")
-                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                        Text(calibrationSubtitleText)
+                            .font(.system(size: 13.5, weight: .medium, design: .rounded))
                             .foregroundStyle(MacOS27Theme.secondaryInk)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 460)
                     }
+                    .id(selectedCalibrationModality)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
 
                     // Glowing Blue Multi-Bar Waveform + Circular Progress Ring ("2 / 3")
                     HStack(spacing: 28) {
@@ -547,10 +598,10 @@ public struct SettingsWindowView: View {
                             }
                         }
                     }
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
 
-                    // Status + Simulate Tap Button
-                    HStack(spacing: 14) {
+                    // Status + Simulate Tap + Next Modality Button
+                    HStack(spacing: 12) {
                         Text(engine.calibrationStatusText)
                             .font(.system(size: 12.5, weight: .medium, design: .rounded))
                             .foregroundStyle(MacOS27Theme.secondaryInk)
@@ -559,9 +610,14 @@ public struct SettingsWindowView: View {
                             if !engine.isCalibratingKnocks {
                                 engine.startGuidedKnockCalibration()
                             }
-                            engine.recordCalibrationSample(jerkG: 0.062, rollDegPerSec: -2.5)
+                            if selectedCalibrationModality == .snap {
+                                engine.recordCalibrationSample(jerkG: 0.048, rollDegPerSec: 0.0)
+                                onTriggerAction(.doubleSnap)
+                            } else {
+                                engine.recordCalibrationSample(jerkG: 0.062, rollDegPerSec: -2.5)
+                            }
                         } label: {
-                            Text("Record Sample Tap")
+                            Text(selectedCalibrationModality == .snap ? "Test Sample Snap" : "Record Sample Tap")
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .foregroundStyle(MacOS27Theme.primaryBlue)
                                 .padding(.horizontal, 12)
@@ -572,18 +628,42 @@ public struct SettingsWindowView: View {
                                 )
                         }
                         .buttonStyle(.plain)
+
+                        Button {
+                            stepCalibrationModality(delta: 1)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Next")
+                                Image(systemName: "arrow.right")
+                            }
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule(style: .continuous).fill(MacOS27Theme.primaryBlue))
+                        }
+                        .buttonStyle(.plain)
                     }
 
-                    // Bottom 4 Progress Dots (Green completed + Gray remaining)
-                    let stepCount = min(4, engine.calibrationRecordedJerks.count + 1)
+                    // Bottom 5 Interactive Progress Dots (one per CalibrationModalityTab)
+                    let allTabs = CalibrationModalityTab.allCases
+                    let activeTabIdx = allTabs.firstIndex(of: selectedCalibrationModality) ?? 0
                     HStack(spacing: 10) {
-                        ForEach(0..<4, id: \.self) { dotIdx in
-                            Circle()
-                                .fill(dotIdx < stepCount ? MacOS27Theme.statusEmerald : Color.gray.opacity(0.28))
-                                .frame(width: 9, height: 9)
+                        ForEach(0..<allTabs.count, id: \.self) { dotIdx in
+                            Button {
+                                withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                                    selectedCalibrationModality = allTabs[dotIdx]
+                                    activateCalibrationModality(allTabs[dotIdx])
+                                }
+                            } label: {
+                                Circle()
+                                    .fill(dotIdx <= activeTabIdx ? MacOS27Theme.statusEmerald : Color.gray.opacity(0.28))
+                                    .frame(width: dotIdx == activeTabIdx ? 11 : 8, height: dotIdx == activeTabIdx ? 11 : 8)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 6)
 
                     Spacer()
                 }
@@ -600,6 +680,21 @@ public struct SettingsWindowView: View {
         case .trackpad: return "Hold trackpad & tap 3 times"
         case .hinge: return "Nudge display lid 3 times (Angle: \(Int(engine.currentLidAngleDegrees))°)"
         case .spatialZones: return "Tap Left & Right palm rest 3 times"
+        }
+    }
+
+    private var calibrationSubtitleText: String {
+        switch selectedCalibrationModality {
+        case .knock:
+            return "Knock firmly with a knuckle on the aluminum palm rest (left or right of the trackpad). Requires BMI286 chassis motion."
+        case .snap:
+            return "Snap your fingers in the air 15–50 cm from the screen. High-frequency (2.2–5.5 kHz) with zero chassis motion — never confused with a tap."
+        case .trackpad:
+            return "Rest one thumb lightly on the glass Force Touch trackpad while double-knocking the aluminum palm rest with your other hand."
+        case .hinge:
+            return "Gently nudge the top of your MacBook display lid by ≥1.8° within 180 ms using the internal Lid Angle Sensor."
+        case .spatialZones:
+            return "Tap the Left palm rest vs. Right palm rest. BMI286 X-axis roll torque distinguishes Left vs. Right impacts."
         }
     }
 
@@ -640,16 +735,21 @@ public struct SettingsWindowView: View {
                 Menu {
                     ForEach(AcousticGestureType.experimentalGestures) { exp in
                         Button {
-                            engine.config.enableExperimentalSpatialZones = true
-                            engine.config.enableExperimentalHingeDial = true
-                            engine.setGestureEnabled(exp, enabled: true)
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                engine.config.enableExperimentalSpatialZones = true
+                                engine.config.enableExperimentalHingeDial = true
+                                engine.setGestureEnabled(exp, enabled: true)
+                                expandedGesture = exp
+                            }
                         } label: {
                             Label("Enable \(exp.title)", systemImage: exp.symbolName)
                         }
                     }
                     Divider()
                     Button {
-                        selectedSection = .studio
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                            selectedSection = .studio
+                        }
                     } label: {
                         Label("Record Custom Rhythm...", systemImage: "metronome")
                     }
@@ -695,8 +795,34 @@ public struct SettingsWindowView: View {
                                     engine.setGestureEnabled(gesture, enabled: newVal)
                                 }
                             ),
+                            isExpanded: Binding(
+                                get: { expandedGesture == gesture },
+                                set: { expand in
+                                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                        expandedGesture = expand ? gesture : nil
+                                    }
+                                }
+                            ),
                             onTest: {
                                 onTriggerAction(gesture)
+                            },
+                            onCalibrate: {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                    switch gesture {
+                                    case .doubleSnap, .knockPlusSnap:
+                                        selectedCalibrationModality = .snap
+                                    case .trackpadHoldDoubleKnock:
+                                        selectedCalibrationModality = .trackpad
+                                    case .hingeNudge:
+                                        selectedCalibrationModality = .hinge
+                                    case .leftZoneDoubleKnock, .rightZoneDoubleKnock:
+                                        selectedCalibrationModality = .spatialZones
+                                    default:
+                                        selectedCalibrationModality = .knock
+                                    }
+                                    isShowingCalibrationSheet = true
+                                    activateCalibrationModality(selectedCalibrationModality)
+                                }
                             }
                         )
                     }
@@ -934,8 +1060,37 @@ public struct SettingsWindowView: View {
 
     // MARK: - 6. Profiles View (Matches Bottom-Right Reference Image)
 
+    private var selectedProfileMeta: (title: String, purpose: String, badgeColor: Color) {
+        switch engine.config.selectedPresetProfileID {
+        case "focus":
+            return (
+                "Focus Profile — Deep Work & Zero Distraction",
+                "Designed for coding, writing, and deep work: Double Knock locks your screen when stepping away, Triple Knock toggles your Privacy Shield overlay, Double Snap mutes your microphone, and Knock + Snap opens Spotlight.",
+                Color(red: 0.34, green: 0.68, blue: 0.62)
+            )
+        case "creative":
+            return (
+                "Creative Profile — Media, Design & Timeline Control",
+                "Designed for video editing, music production, and design: Double Knock plays/pauses playback, Triple Knock skips to the next track, Double Snap captures an instant screenshot, and Knock + Snap invokes Mission Control.",
+                Color(red: 0.62, green: 0.38, blue: 0.98)
+            )
+        case "presentation":
+            return (
+                "Presentation Profile — Meetings, Keynotes & Live Demos",
+                "Designed for Zoom/Meet calls and slide decks: Double Knock advances slides (Next Track / Arrow), Triple Knock goes back, Double Snap toggles Microphone Mute with zero keyboard noise, and Knock + Snap triggers Privacy Shield.",
+                Color(red: 0.96, green: 0.58, blue: 0.24)
+            )
+        default:
+            return (
+                "Default Profile — Everyday All-Rounder",
+                "Balanced for daily MacBook usage: Double Knock plays/pauses media, Triple Knock skips tracks, Double Snap mutes/unmutes your microphone in the air, Knock + Snap opens Spotlight, and Trackpad Hold + Double Knock locks your screen.",
+                Color(red: 0.20, green: 0.54, blue: 0.98)
+            )
+        }
+    }
+
     private var profilesGalleryView: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             // Top Header: "Profiles" + "Edit" + "+"
             HStack(spacing: 10) {
                 Text("Profiles")
@@ -945,7 +1100,9 @@ public struct SettingsWindowView: View {
                 Spacer()
 
                 Button {
-                    selectedSection = .gestures
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        selectedSection = .gestures
+                    }
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "square.and.pencil")
@@ -965,7 +1122,9 @@ public struct SettingsWindowView: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    engine.applyPresetProfile("default")
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        engine.applyPresetProfile("default")
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 12.5, weight: .bold))
@@ -980,103 +1139,185 @@ public struct SettingsWindowView: View {
                 .buttonStyle(.plain)
             }
 
-            // 4 Tinted Glass Profile Cards (Default, Focus, Creative, Presentation)
-            HStack(spacing: 16) {
-                ProfilePresetGlassCard(
-                    id: "default",
-                    title: "Default",
-                    subtitle: "Everyday use",
-                    symbol: "laptopcomputer",
-                    tint: Color(red: 0.20, green: 0.54, blue: 0.98),
-                    isSelected: engine.config.selectedPresetProfileID == "default"
-                ) {
-                    engine.applyPresetProfile("default")
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // 4 Tinted Glass Profile Cards (Default, Focus, Creative, Presentation)
+                    HStack(spacing: 16) {
+                        ProfilePresetGlassCard(
+                            id: "default",
+                            title: "Default",
+                            subtitle: "Everyday use",
+                            symbol: "laptopcomputer",
+                            tint: Color(red: 0.20, green: 0.54, blue: 0.98),
+                            isSelected: engine.config.selectedPresetProfileID == "default"
+                        ) {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                engine.applyPresetProfile("default")
+                            }
+                        }
 
-                ProfilePresetGlassCard(
-                    id: "focus",
-                    title: "Focus",
-                    subtitle: "Productivity mode",
-                    symbol: "leaf.fill",
-                    tint: Color(red: 0.34, green: 0.68, blue: 0.62),
-                    isSelected: engine.config.selectedPresetProfileID == "focus"
-                ) {
-                    engine.applyPresetProfile("focus")
-                }
+                        ProfilePresetGlassCard(
+                            id: "focus",
+                            title: "Focus",
+                            subtitle: "Productivity mode",
+                            symbol: "leaf.fill",
+                            tint: Color(red: 0.34, green: 0.68, blue: 0.62),
+                            isSelected: engine.config.selectedPresetProfileID == "focus"
+                        ) {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                engine.applyPresetProfile("focus")
+                            }
+                        }
 
-                ProfilePresetGlassCard(
-                    id: "creative",
-                    title: "Creative",
-                    subtitle: "Editing & design",
-                    symbol: "paintbrush.pointed.fill",
-                    tint: Color(red: 0.62, green: 0.38, blue: 0.98),
-                    isSelected: engine.config.selectedPresetProfileID == "creative"
-                ) {
-                    engine.applyPresetProfile("creative")
-                }
+                        ProfilePresetGlassCard(
+                            id: "creative",
+                            title: "Creative",
+                            subtitle: "Editing & design",
+                            symbol: "paintbrush.pointed.fill",
+                            tint: Color(red: 0.62, green: 0.38, blue: 0.98),
+                            isSelected: engine.config.selectedPresetProfileID == "creative"
+                        ) {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                engine.applyPresetProfile("creative")
+                            }
+                        }
 
-                ProfilePresetGlassCard(
-                    id: "presentation",
-                    title: "Presentation",
-                    subtitle: "Meetings & talks",
-                    symbol: "tv.fill",
-                    tint: Color(red: 0.96, green: 0.58, blue: 0.24),
-                    isSelected: engine.config.selectedPresetProfileID == "presentation"
-                ) {
-                    engine.applyPresetProfile("presentation")
-                }
-            }
-
-            // Per-Application Automatic Switching Section
-            LiquidGlassCard(cornerRadius: 18, padding: 16) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Automatic App-Specific Profiles")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(MacOS27Theme.primaryInk)
-                        Spacer()
-                        Text("Active App: \(engine.contextObserver.frontmostAppName)")
-                            .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                            .foregroundStyle(MacOS27Theme.primaryBlue)
+                        ProfilePresetGlassCard(
+                            id: "presentation",
+                            title: "Presentation",
+                            subtitle: "Meetings & talks",
+                            symbol: "tv.fill",
+                            tint: Color(red: 0.96, green: 0.58, blue: 0.24),
+                            isSelected: engine.config.selectedPresetProfileID == "presentation"
+                        ) {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                engine.applyPresetProfile("presentation")
+                            }
+                        }
                     }
 
-                    ForEach($engine.appProfiles) { $profile in
-                        HStack {
-                            Toggle(isOn: $profile.isEnabled) {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(profile.displayName)
-                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                    Text(profile.bundleIdentifier)
-                                        .font(.system(size: 10.5, design: .monospaced))
+                    // Active Profile Function & Live Gesture Matrix Card
+                    let meta = selectedProfileMeta
+                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Circle()
+                                    .fill(meta.badgeColor)
+                                    .frame(width: 10, height: 10)
+                                Text(meta.title)
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundStyle(MacOS27Theme.primaryInk)
+                                Spacer()
+                                Text("Active Preset")
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(meta.badgeColor)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(meta.badgeColor.opacity(0.14)))
+                            }
+
+                            Text(meta.purpose)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(MacOS27Theme.secondaryInk)
+
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                                ForEach(AcousticGestureType.coreGestures) { g in
+                                    let act = engine.gestureActions[g] ?? .playPauseMedia
+                                    Button {
+                                        onTriggerAction(g)
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: g.symbolName)
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(meta.badgeColor)
+                                                .frame(width: 18)
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text(g.title)
+                                                    .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                                                    .foregroundStyle(MacOS27Theme.primaryInk)
+                                                    .lineLimit(1)
+                                                Text(act.shortTitle)
+                                                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                                                    .foregroundStyle(MacOS27Theme.secondaryInk)
+                                                    .lineLimit(1)
+                                            }
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .fill(Color.white.opacity(0.78))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                        .strokeBorder(MacOS27Theme.subtleStroke, lineWidth: 0.8)
+                                                )
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Click to test \(g.title) → \(act.title)")
+                                }
+                            }
+                        }
+                    }
+                    .id(engine.config.selectedPresetProfileID)
+                    .transition(.opacity.combined(with: .scale(scale: 0.99)))
+
+                    // Per-Application Automatic Switching Section
+                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Automatic App-Specific Context Overrides")
+                                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                                        .foregroundStyle(MacOS27Theme.primaryInk)
+                                    Text("When enabled, Reson automatically overrides gestures while these apps are in front.")
+                                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
                                         .foregroundStyle(MacOS27Theme.secondaryInk)
                                 }
-                            }
-                            .toggleStyle(.switch)
-                            .onChange(of: profile.isEnabled) { _, _ in
-                                engine.saveConfiguration()
+                                Spacer()
+                                Text("Front App: \(engine.contextObserver.frontmostAppName)")
+                                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(MacOS27Theme.primaryBlue)
                             }
 
-                            Spacer()
+                            ForEach($engine.appProfiles) { $profile in
+                                HStack {
+                                    Toggle(isOn: $profile.isEnabled) {
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(profile.displayName)
+                                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                            Text(profile.bundleIdentifier)
+                                                .font(.system(size: 10.5, design: .monospaced))
+                                                .foregroundStyle(MacOS27Theme.secondaryInk)
+                                        }
+                                    }
+                                    .toggleStyle(.switch)
+                                    .onChange(of: profile.isEnabled) { _, _ in
+                                        engine.saveConfiguration()
+                                    }
 
-                            Picker("Double Knock", selection: Binding(
-                                get: { profile.mappings[.doubleKnock] ?? .playPauseMedia },
-                                set: { newVal in
-                                    profile.mappings[.doubleKnock] = newVal
-                                    engine.saveConfiguration()
+                                    Spacer()
+
+                                    Picker("Double Knock", selection: Binding(
+                                        get: { profile.mappings[.doubleKnock] ?? .playPauseMedia },
+                                        set: { newVal in
+                                            profile.mappings[.doubleKnock] = newVal
+                                            engine.saveConfiguration()
+                                        }
+                                    )) {
+                                        ForEach(SystemActionType.allCases) { act in
+                                            Text(act.shortTitle).tag(act)
+                                        }
+                                    }
+                                    .frame(width: 190)
                                 }
-                            )) {
-                                ForEach(SystemActionType.allCases) { act in
-                                    Text(act.shortTitle).tag(act)
-                                }
+                                .padding(.vertical, 4)
                             }
-                            .frame(width: 190)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
             }
-
-            Spacer()
         }
     }
 
@@ -1357,6 +1598,135 @@ public struct SettingsWindowView: View {
             }
         }
     }
+
+    // MARK: - 10. Pinpoint Detailed Guide View
+
+    private var guideReferenceView: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Pinpoint User Guide & Sensor Reference")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(MacOS27Theme.primaryInk)
+                    Text("Exact instructions for where to knock, how Snap vs. Tap separation works, and what every profile & gesture does.")
+                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(MacOS27Theme.secondaryInk)
+                }
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        selectedCalibrationModality = .knock
+                        isShowingCalibrationSheet = true
+                        engine.startGuidedKnockCalibration()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform.badge.magnifyingglass")
+                        Text("Open Calibrator")
+                    }
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(MacOS27Theme.primaryBlue))
+                }
+                .buttonStyle(.plain)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    // Section 1: Where to Knock vs. How to Snap
+                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "cpu.fill")
+                                    .foregroundStyle(MacOS27Theme.primaryBlue)
+                                Text("1. Pinpoint Knock vs. Finger Snap Separation (Zero Cross-Talk)")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundStyle(MacOS27Theme.primaryInk)
+                            }
+
+                            Text("• Where to Knock (Tap): Use your knuckle or fingertip to tap firmly on the aluminum palm rest to the LEFT or RIGHT of the trackpad (115–480 ms between taps). Your MacBook's internal Bosch BMI286 IMU measures the physical Z-axis chassis shock (≥0.020 g) + low-frequency structural resonance (120–400 Hz).")
+                                .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                                .foregroundStyle(MacOS27Theme.primaryInk)
+
+                            Text("• How to Snap in the Air: Snap your fingers 15–50 cm away from the screen without touching the laptop. Reson verifies that BMI286 physical chassis acceleration is 0.000 g and checks for a high-frequency airborne acoustic burst (2.2–5.5 kHz, high Zero-Crossing Rate). Because there is zero chassis motion, an airborne snap is NEVER misclassified as a tap.")
+                                .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                                .foregroundStyle(MacOS27Theme.primaryInk)
+                        }
+                    }
+
+                    // Section 2: All 9 Physical Gestures Explained
+                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "hand.tap.fill")
+                                    .foregroundStyle(MacOS27Theme.primaryBlue)
+                                Text("2. All 9 Physical Gestures & How to Perform Them")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundStyle(MacOS27Theme.primaryInk)
+                            }
+
+                            ForEach(AcousticGestureType.allCases) { gesture in
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: gesture.symbolName)
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                        .foregroundStyle(MacOS27Theme.primaryBlue)
+                                        .frame(width: 20)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack {
+                                            Text(gesture.title)
+                                                .font(.system(size: 12.5, weight: .bold, design: .rounded))
+                                                .foregroundStyle(MacOS27Theme.primaryInk)
+                                            Text("→ \((engine.gestureActions[gesture] ?? .playPauseMedia).title)")
+                                                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(MacOS27Theme.primaryBlue)
+                                        }
+                                        Text(gesture.subtitle)
+                                            .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                                            .foregroundStyle(MacOS27Theme.secondaryInk)
+                                    }
+                                    Spacer()
+                                    Button("Try") {
+                                        onTriggerAction(gesture)
+                                    }
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(MacOS27Theme.primaryBlue)
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.vertical, 3)
+                            }
+                        }
+                    }
+
+                    // Section 3: What the 4 Profiles & Automatic App Overrides Do
+                    LiquidGlassCard(cornerRadius: 18, padding: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "person.crop.square.filled.and.at.rectangle")
+                                    .foregroundStyle(MacOS27Theme.primaryBlue)
+                                Text("3. What Each Profile Does (Preset Modes + App Context)")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundStyle(MacOS27Theme.primaryInk)
+                            }
+
+                            Text("• Default Profile: Everyday control — Double Knock = Play/Pause Media, Triple Knock = Next Track, Double Snap = Mute Mic, Knock + Snap = Spotlight.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                            Text("• Focus Profile: Deep work & security — Double Knock = Lock Screen, Triple Knock = Privacy Shield, Double Snap = Mute Mic, Knock + Snap = Spotlight.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                            Text("• Creative Profile: Design & timeline workflow — Double Knock = Play/Pause, Triple Knock = Next Track, Double Snap = Screenshot, Knock + Snap = Mission Control.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                            Text("• Presentation Profile: Meetings & Keynotes — Double Knock = Next Slide/Track, Triple Knock = Previous Slide/Track, Double Snap = Mute Mic, Knock + Snap = Privacy Shield.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                            Text("• Automatic App-Specific Profiles: When Spotify, Music, Zoom, FaceTime, or Keynote is the frontmost window, Reson automatically adapts Double Knock to control that specific app.")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(MacOS27Theme.primaryBlue)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Subcomponents Matching the Reference Mockup
@@ -1507,88 +1877,183 @@ private struct ResonGestureRowCard: View {
     let gesture: AcousticGestureType
     @Binding var mappedAction: SystemActionType
     @Binding var isEnabled: Bool
+    @Binding var isExpanded: Bool
     let onTest: () -> Void
+    let onCalibrate: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            // Left Reson R))) or Gesture Icon Badge
-            Button(action: onTest) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(Color(red: 0.92, green: 0.95, blue: 0.99))
-                        .frame(width: 38, height: 38)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                .strokeBorder(Color.white, lineWidth: 1)
-                        )
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 14) {
+                // Left Reson R))) or Gesture Icon Badge
+                Button(action: onTest) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .fill(Color(red: 0.92, green: 0.95, blue: 0.99))
+                            .frame(width: 38, height: 38)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .strokeBorder(Color.white, lineWidth: 1)
+                            )
 
-                    if gesture == .doubleKnock || gesture == .knockPlusSnap {
-                        ResonBrandMark(size: 24)
-                    } else {
-                        Image(systemName: gesture.symbolName)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(MacOS27Theme.primaryInk)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .help("Click to test \(gesture.title)")
-
-            // Title + Mapped Action Subtitle (with inline Menu picker)
-            Menu {
-                ForEach(SystemActionType.allCases) { action in
-                    Button {
-                        mappedAction = action
-                    } label: {
-                        HStack {
-                            Text(action.title)
-                            if mappedAction == action {
-                                Image(systemName: "checkmark")
-                            }
+                        if gesture == .doubleKnock || gesture == .knockPlusSnap {
+                            ResonBrandMark(size: 24)
+                        } else {
+                            Image(systemName: gesture.symbolName)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(MacOS27Theme.primaryInk)
                         }
                     }
                 }
-                Divider()
-                Button("Trigger / Preview Gesture Now") {
-                    onTest()
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(gesture.title)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(MacOS27Theme.primaryInk)
+                .buttonStyle(.plain)
+                .help("Click to test \(gesture.title)")
 
-                    Text(mappedAction.title)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(MacOS27Theme.secondaryInk)
+                // Title + Mapped Action Subtitle (clicking expands/collapses detail drawer)
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(gesture.title)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(MacOS27Theme.primaryInk)
+
+                        Text(mappedAction.title)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(MacOS27Theme.secondaryInk)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                // macOS Blue Toggle Switch
+                Toggle("", isOn: $isEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(MacOS27Theme.primaryBlue)
+
+                // Interactive Right-Side Chevron Arrow Button
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(isExpanded ? MacOS27Theme.primaryBlue : MacOS27Theme.secondaryInk)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 28, height: 28)
+                        .background(
+                            Circle()
+                                .fill(isExpanded ? MacOS27Theme.primaryBlue.opacity(0.14) : Color.black.opacity(0.04))
+                        )
+                        .animation(.spring(response: 0.26, dampingFraction: 0.82), value: isExpanded)
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Collapse gesture details" : "Expand gesture settings & action picker")
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
 
-            Spacer()
+            if isExpanded {
+                Divider()
+                    .overlay(MacOS27Theme.subtleStroke)
+                    .padding(.horizontal, 16)
 
-            // macOS Blue Toggle Switch
-            Toggle("", isOn: $isEnabled)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(MacOS27Theme.primaryBlue)
+                VStack(alignment: .leading, spacing: 12) {
+                    // Pinpoint How-To Guidance Banner
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(MacOS27Theme.primaryBlue)
+                            .padding(.top, 1)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(MacOS27Theme.mutedInk)
+                        Text(gesture.subtitle)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(MacOS27Theme.secondaryInk)
+
+                        Spacer()
+
+                        Button {
+                            onTest()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 10))
+                                Text("Test Action")
+                                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(MacOS27Theme.primaryBlue))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            onCalibrate()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "waveform")
+                                    .font(.system(size: 10.5))
+                                Text("Calibrate")
+                                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundStyle(MacOS27Theme.primaryBlue)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(MacOS27Theme.primaryBlue.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // Interactive Action Picker Pill Grid
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(SystemActionType.allCases.filter { $0 != .disabled }) { action in
+                            let selected = (mappedAction == action)
+                            Button {
+                                withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+                                    mappedAction = action
+                                }
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: action.symbolName)
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                        .foregroundStyle(selected ? .white : MacOS27Theme.primaryBlue)
+                                        .frame(width: 16)
+                                    Text(action.shortTitle)
+                                        .font(.system(size: 11.5, weight: selected ? .bold : .medium, design: .rounded))
+                                        .foregroundStyle(selected ? .white : MacOS27Theme.primaryInk)
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(selected ? MacOS27Theme.primaryBlue : Color.white.opacity(0.75))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .strokeBorder(selected ? MacOS27Theme.primaryBlue : MacOS27Theme.subtleStroke, lineWidth: 0.8)
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.82))
+                .fill(Color.white.opacity(isExpanded ? 0.92 : 0.82))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.white, lineWidth: 1.2)
+                        .strokeBorder(isExpanded ? MacOS27Theme.primaryBlue.opacity(0.45) : Color.white, lineWidth: isExpanded ? 1.5 : 1.2)
                 )
-                .shadow(color: Color.black.opacity(0.035), radius: 8, x: 0, y: 3)
+                .shadow(color: Color.black.opacity(isExpanded ? 0.06 : 0.035), radius: isExpanded ? 12 : 8, x: 0, y: 4)
         )
     }
 }

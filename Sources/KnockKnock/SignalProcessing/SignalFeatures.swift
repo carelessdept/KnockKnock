@@ -49,27 +49,22 @@ public enum AcousticSignalMath {
 
         // Stage 3: Sensor Fusion Mode (BMI286 Motion + 48kHz Audio)
         if config.modalityMode == .sensorFusion {
-            // 3a. Corroborated physical knock (both BMI286 motion spike AND acoustic transient, or strong motion spike alone)
-            if hasMotionSpike {
-                return (.fusedChassisKnock, .accepted, max(crestFactor, 5.5), max(lowRatio, 0.65), highRatio, zone)
+            // 3a. Crisp upper-mid air transient WITH ZERO chassis motion -> 100% Finger Snap!
+            // Because finger snaps happen in the air (corroboratingMotionJerkG < 0.010g), any sharp
+            // airborne impulse that doesn't shake the MacBook chassis is classified as a Finger Snap
+            // and NEVER confused with a physical chassis tap!
+            if !hasMotionSpike {
+                if isSustainedEnvelope || crestFactor < config.minimumCrestFactor || vocalRatio >= 0.56 {
+                    return (.ambientRejected, .sustainedAudioRejected, crestFactor, lowRatio, highRatio, zone)
+                }
+                if highRatio >= 0.24 || crestFactor >= config.minimumCrestFactor {
+                    return (.fingerSnap, .accepted, crestFactor, lowRatio, max(highRatio, 0.52), .any)
+                }
+                return (.ambientRejected, .insufficientMotionJerk, crestFactor, lowRatio, highRatio, zone)
             }
 
-            // 3b. Audio-only transient: reject if sustained (speech/music) or low crest factor
-            if isSustainedEnvelope || crestFactor < config.minimumCrestFactor || vocalRatio >= 0.56 {
-                return (.ambientRejected, .sustainedAudioRejected, crestFactor, lowRatio, highRatio, zone)
-            }
-
-            // 3c. Crisp upper-mid air transient (Finger Snap: 2.2-4.8 kHz dominates without needing chassis motion)
-            if highRatio >= 0.36 && highRatio >= lowRatio * 0.95 {
-                return (.fingerSnap, .accepted, crestFactor, lowRatio, highRatio, .any)
-            }
-
-            // 3d. Fallback: if SPU motion sensor isn't present on this Mac, allow high-crest structural knock
-            if lowRatio >= 0.42 && lowRatio > highRatio * 1.25 {
-                return (.fusedChassisKnock, .accepted, crestFactor, lowRatio, highRatio, zone)
-            }
-
-            return (.ambientRejected, .insufficientMotionJerk, crestFactor, lowRatio, highRatio, zone)
+            // 3b. Corroborated physical knock (real instantaneous BMI286 motion spike on the chassis)
+            return (.fusedChassisKnock, .accepted, max(crestFactor, 5.5), max(lowRatio, 0.65), highRatio, zone)
         }
 
         // Stage 4: Microphone-Only Mode

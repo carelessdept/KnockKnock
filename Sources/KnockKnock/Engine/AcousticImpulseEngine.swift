@@ -192,7 +192,12 @@ public final class AcousticImpulseEngine {
         }
 
         motionService.onHingeNudgeDetected = { [weak self] deltaDeg in
-            guard let self, self.isListening, self.config.enableExperimentalHingeDial else { return }
+            guard let self, self.isListening else { return }
+            if self.isCalibratingKnocks {
+                self.recordCalibrationSample(jerkG: abs(deltaDeg) * 0.015, rollDegPerSec: deltaDeg)
+                return
+            }
+            guard self.config.enableExperimentalHingeDial else { return }
             let now = ProcessInfo.processInfo.systemUptime
             guard (now - self.lastTriggerTime) * 1000.0 >= self.config.cooldownMs else { return }
             self.fireGesture(
@@ -416,8 +421,14 @@ public final class AcousticImpulseEngine {
         var bars = Array(repeating: Float(0.06), count: 16)
 
         var diff1 = [Float](repeating: 0, count: n - 1)
+        var zeroCrossings: Int = 0
         for i in 0..<(n - 1) {
-            diff1[i] = samples[i + 1] - samples[i]
+            let s0 = samples[i]
+            let s1 = samples[i + 1]
+            diff1[i] = s1 - s0
+            if (s0 >= 0 && s1 < 0) || (s0 < 0 && s1 >= 0) {
+                zeroCrossings += 1
+            }
         }
         var diff2 = [Float](repeating: 0, count: n - 2)
         for i in 0..<(n - 2) {
@@ -431,9 +442,17 @@ public final class AcousticImpulseEngine {
         vDSP_rmsqv(diff1, 1, &d1RMS, vDSP_Length(n - 1))
         vDSP_rmsqv(diff2, 1, &d2RMS, vDSP_Length(n - 2))
 
-        let lowEnergy = max(0.0001, rawRMS * 1.8 - d1RMS * 0.65)
-        let midEnergy = max(0.0001, d1RMS * 0.9)
-        let highEnergy = max(0.0001, d2RMS * 1.45)
+        let zcr = Float(zeroCrossings) / Float(max(1, n - 1))
+        let hfRatio = d1RMS / max(rawRMS, 0.0001)
+        let isHighFreqSnapSignature = (zcr >= 0.050 || hfRatio >= 0.50)
+
+        let lowEnergy = isHighFreqSnapSignature
+            ? max(0.0001, rawRMS * 0.45)
+            : max(0.0001, rawRMS * 1.8 - d1RMS * 0.65)
+        let midEnergy = max(0.0001, d1RMS * 0.75)
+        let highEnergy = isHighFreqSnapSignature
+            ? max(0.0001, (d2RMS * 2.4) + (rawRMS * zcr * 8.0))
+            : max(0.0001, d2RMS * 1.45)
 
         let total = max(lowEnergy + midEnergy + highEnergy, 0.0001)
         let centroidHz = (lowEnergy * 210.0 + midEnergy * 1150.0 + highEnergy * 3400.0) / total
@@ -464,7 +483,6 @@ public final class AcousticImpulseEngine {
         currentGyroRollDegPerSec = sample.gyroY
         currentLidAngleDegrees = motionService.lidAngleDegrees
         currentSpatialZone = sample.estimatedZone
-        lastMotionImpact = sample
 
         // Suppress if display hinge is currently moving
         if motionService.isLidMoving {
@@ -483,11 +501,36 @@ public final class AcousticImpulseEngine {
             return
         }
 
-        guard sample.jerkMagnitude >= config.effectiveMotionJerkGateG else { return }
+        guard sample.jerkMagnitude >= max(0.026, config.effectiveMotionJerkGateG) else { return }
 
         let now = sample.timestamp
         guard (now - lastImpulseTime) * 1000.0 >= 120.0 else { return }
+
+        // In Sensor Fusion mode, wait 22ms so if the user snapped their fingers in the air (and the acoustic shockwave
+        // or wrist tremor caused a mild <0.065g vibration), the 48kHz microphone's high-frequency Snap detector wins!
+        if audioEngine != nil && config.modalityMode == .sensorFusion && sample.jerkMagnitude < 0.068 {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(22))
+                guard let self else { return }
+                // If an airborne Finger Snap was just detected within the last 75ms, do NOT treat this tremor as a Knock!
+                if let lastSnap = self.snapPulseTimestamps.last, (ProcessInfo.processInfo.systemUptime - lastSnap) <= 0.080 {
+                    return
+                }
+                if self.highBandLevel > self.lowBandLevel * 0.95 && sample.jerkMagnitude < 0.055 {
+                    return
+                }
+                self.commitHardwareKnockImpact(sample, at: ProcessInfo.processInfo.systemUptime)
+            }
+            return
+        }
+
+        commitHardwareKnockImpact(sample, at: now)
+    }
+
+    private func commitHardwareKnockImpact(_ sample: MotionSample, at now: TimeInterval) {
+        guard (now - lastImpulseTime) * 1000.0 >= 115.0 else { return }
         lastImpulseTime = now
+        lastMotionImpact = sample
 
         // Update visual spectrum bars on physical impact if UI is visible
         if visibleTelemetryConsumers > 0 {
@@ -595,14 +638,16 @@ public final class AcousticImpulseEngine {
         let now = ProcessInfo.processInfo.systemUptime
         guard (now - lastImpulseTime) * 1000.0 >= 115.0 else { return }
 
-        // Check if BMI286 motion sensor already fired within the last 65 ms (avoid double-counting the same knock)
+        // Check if BMI286 motion sensor already fired within the last 65 ms (avoid double-counting the same knock).
+        // CRITICAL: If no hardware motion impact occurred within 65 ms, recentMotionJerk MUST be 0.0
+        // (never use stale decayed motionService.latestJerkG), so airborne Finger Snaps are 100% separated from Taps!
         let recentMotionJerk: Double
         let recentGyroRoll: Double
-        if let m = lastMotionImpact, (now - m.timestamp) <= 0.065 {
+        if let m = lastMotionImpact, (now - m.timestamp) <= 0.065 && highEnergy < lowEnergy {
             return
         } else {
-            recentMotionJerk = motionService.latestJerkG
-            recentGyroRoll = motionService.latestGyroRollDegPerSec
+            recentMotionJerk = 0.0
+            recentGyroRoll = 0.0
         }
 
         guard let classified = AcousticSignalMath.classifyImpulse(
@@ -631,8 +676,8 @@ public final class AcousticImpulseEngine {
             appendWaveformPoint(&eventTimelineHistory, value: 0.92)
         }
 
-        if isCalibratingKnocks && classified.kind != .fingerSnap {
-            recordCalibrationSample(jerkG: max(recentMotionJerk, Double(peak) * 0.18), rollDegPerSec: recentGyroRoll)
+        if isCalibratingKnocks {
+            recordCalibrationSample(jerkG: max(recentMotionJerk, Double(peak) * 0.14), rollDegPerSec: recentGyroRoll)
             return
         }
 
